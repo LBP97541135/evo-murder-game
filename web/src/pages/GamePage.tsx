@@ -38,7 +38,7 @@ import {
   IconShieldCheck,
   IconUsers,
 } from "@tabler/icons-react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 import { StudioShell } from "./StudioShell";
 
@@ -52,6 +52,7 @@ const scriptMap: Record<string, string> = {
 };
 
 function GamePage() {
+  const navigate = useNavigate();
   const { id = "iron-avenue" } = useParams();
   const scriptTitle = scriptMap[id] || "未知剧本";
   const [mode, setMode] = React.useState("solo");
@@ -107,6 +108,14 @@ function GamePage() {
               </Text>
             </Stack>
             <Group gap="sm">
+              <Button
+                variant="light"
+                radius="xl"
+                leftSection={<IconArrowBackUp size={16} />}
+                onClick={() => navigate("/games")}
+              >
+                返回我的游戏
+              </Button>
               <Badge color="orange" variant="filled" leftSection={<IconUsers size={14} />}>
                 4 人在线
               </Badge>

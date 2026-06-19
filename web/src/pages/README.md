@@ -10,9 +10,11 @@
 |------|------|------|
 | `StudioShell.tsx` | - | 全站共享布局壳，负责顶部栏、路由导航、Hero 与统计面板 |
 | `ScriptLibrary.tsx` | `/library` | 剧本库：浏览、搜索、筛选、推荐与详情 |
+| `MyGamesPage.tsx` | `/games` | 我的游戏：进行中与已完成的历史游戏列表 |
 | `GamePage.tsx` | `/play/:id` | 游戏主界面：模式切换、对局舞台、互动、节奏控制与复盘 |
 | `AgentPanel.tsx` | `/agents` | 陪玩 Agent 广场 + DM-Agent 广场 + 操作中心 |
 | `EvolutionTimeline.tsx` | `/evolution` | 个人助手中枢：画像、标签、推荐、总结、开局前助手 |
+| `ProfilePage.tsx` | `/profile` | 个人主页：我的档案与我的游戏入口 |
 
 ## 共享约定
 
@@ -65,7 +67,7 @@
 - 统一站点品牌与导航
 - 根据当前 pathname 高亮路由
 - 提供页面 Hero、eyebrow、说明文案和统计数据插槽
-- 在桌面顶部导航之外提供页面内导航，保证窄屏可访问性
+- 使用顶部主导航统一承载页面切换入口
 
 ## 进度
 

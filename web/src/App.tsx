@@ -16,9 +16,12 @@ import {
 } from "./providers/contexts";
 
 import { ScriptLibrary } from "./pages/ScriptLibrary";
+import { ScriptDetailPage } from "./pages/ScriptDetailPage";
 import { GamePage } from "./pages/GamePage";
 import { AgentPanel } from "./pages/AgentPanel";
 import { EvolutionTimeline } from "./pages/EvolutionTimeline";
+import { MyGamesPage } from "./pages/MyGamesPage";
+import { ProfilePage } from "./pages/ProfilePage";
 import "./styles.css";
 
 const theme = createTheme({
@@ -68,9 +71,12 @@ function App() {
                 <Routes>
                   <Route path="/" element={<Navigate to="/library" replace />} />
                   <Route path="/library" element={<ScriptLibrary />} />
+                  <Route path="/library/:id" element={<ScriptDetailPage />} />
+                  <Route path="/games" element={<MyGamesPage />} />
                   <Route path="/play/:id" element={<GamePage />} />
                   <Route path="/agents" element={<AgentPanel />} />
                   <Route path="/evolution" element={<EvolutionTimeline />} />
+                  <Route path="/profile" element={<ProfilePage />} />
                 </Routes>
               </MysteryProvider>
             </SessionProvider>

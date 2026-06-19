@@ -1,6 +1,7 @@
 import React from "react";
 import {
   AppShell,
+  Avatar,
   Badge,
   Box,
   Button,
@@ -14,17 +15,15 @@ import {
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   IconArchive,
-  IconBolt,
   IconBrain,
+  IconDeviceGamepad2,
   IconLayoutDashboard,
-  IconPlayerPlay,
   IconRobot,
-  IconTimelineEventExclamation,
 } from "@tabler/icons-react";
 
 const NAV_ITEMS = [
   { key: "library", label: "剧本库", to: "/library", icon: IconArchive },
-  { key: "play", label: "游戏主界面", to: "/play/iron-avenue", icon: IconPlayerPlay },
+  { key: "games", label: "我的游戏", to: "/games", icon: IconDeviceGamepad2 },
   { key: "agents", label: "Agent 广场", to: "/agents", icon: IconRobot },
   { key: "evolution", label: "个人助手", to: "/evolution", icon: IconBrain },
 ];
@@ -34,6 +33,7 @@ type StudioShellProps = {
   subtitle: string;
   eyebrow: string;
   stats: Array<{ label: string; value: string }>;
+  hero?: React.ReactNode;
   children: React.ReactNode;
 };
 
@@ -42,10 +42,15 @@ export function StudioShell({
   subtitle,
   eyebrow,
   stats,
+  hero,
   children,
 }: StudioShellProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const isItemActive = (item: (typeof NAV_ITEMS)[number]) =>
+    location.pathname === item.to ||
+    location.pathname.startsWith(`${item.to}/`) ||
+    (item.key === "games" && location.pathname.startsWith("/play/"));
 
   return (
     <AppShell className="studio-shell" header={{ height: 88 }} padding={0}>
@@ -77,9 +82,7 @@ export function StudioShell({
 
             <Group gap="xs" wrap="nowrap" visibleFrom="md">
               {NAV_ITEMS.map((item) => {
-                const active =
-                  location.pathname === item.to ||
-                  location.pathname.startsWith(`${item.to}/`);
+                const active = isItemActive(item);
                 const Icon = item.icon;
                 return (
                   <Button
@@ -97,22 +100,42 @@ export function StudioShell({
             </Group>
 
             <Group gap="xs" wrap="nowrap">
-              <Button
+              {/* <Button
                 variant="light"
-                leftSection={<IconBolt size={16} />}
-                onClick={() => navigate("/library")}
+                leftSection={<IconDeviceGamepad2 size={16} />}
+                onClick={() => navigate("/games")}
                 radius="xl"
+                visibleFrom="lg"
               >
-                快速开局
-              </Button>
-              <Button
-                variant="default"
-                leftSection={<IconTimelineEventExclamation size={16} />}
-                onClick={() => navigate("/evolution")}
-                radius="xl"
+                我的游戏
+              </Button> */}
+              <Group
+                gap="sm"
+                wrap="nowrap"
+                onClick={() => navigate("/profile")}
+                role="link"
+                aria-label="进入林晓青的个人主页"
+                tabIndex={0}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    navigate("/profile");
+                  }
+                }}
+                style={{ cursor: "pointer" }}
               >
-                个人助手
-              </Button>
+                <Avatar
+                  size={42}
+                  radius="xl"
+                  color="red"
+                  src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=160&h=160&fit=crop&auto=format"
+                >
+                  林
+                </Avatar>
+                <Stack gap={0} visibleFrom="sm">
+                  <Text size="sm" fw={800}>林晓青</Text>
+                  <Text size="xs" c="dimmed">个人主页</Text>
+                </Stack>
+              </Group>
             </Group>
           </Group>
         </Container>
@@ -121,56 +144,39 @@ export function StudioShell({
       <AppShell.Main className="studio-main">
         <Container size="7xl" py={{ base: "lg", md: "xl" }}>
           <Stack gap="xl">
-            <Paper radius="xl" p={{ base: "lg", md: "xl" }} className="studio-hero">
-              <Group justify="space-between" align="flex-start" wrap="wrap" gap="xl">
-                <Stack gap="sm" style={{ maxWidth: 760 }}>
-                  <Text className="monospace-label" size="xs" c="red.3">
-                    {eyebrow}
-                  </Text>
-                  <Title order={1} fz={{ base: 30, md: 48 }} lh={1.05}>
-                    {title}
-                  </Title>
-                  <Text size="lg" c="dimmed" lh={1.8} maw={700}>
-                    {subtitle}
-                  </Text>
-                </Stack>
-
-                <Paper radius="xl" p="lg" className="tone-panel" style={{ minWidth: 300 }}>
-                  <Text className="monospace-label" size="xs" c="dimmed" mb={8}>
-                    signal board
-                  </Text>
-                  <Stack gap="sm">
-                    {stats.map((stat) => (
-                      <Group key={stat.label} justify="space-between" wrap="nowrap">
-                        <Text size="sm" c="dimmed">
-                          {stat.label}
-                        </Text>
-                        <Text fw={800}>{stat.value}</Text>
-                      </Group>
-                    ))}
+            {hero ?? (
+              <Paper radius="xl" p={{ base: "lg", md: "xl" }} className="studio-hero">
+                <Group justify="space-between" align="flex-start" wrap="wrap" gap="xl">
+                  <Stack gap="sm" style={{ maxWidth: 760 }}>
+                    <Text className="monospace-label" size="xs" c="red.3">
+                      {eyebrow}
+                    </Text>
+                    <Title order={1} fz={{ base: 30, md: 48 }} lh={1.05}>
+                      {title}
+                    </Title>
+                    <Text size="lg" c="dimmed" lh={1.8} maw={700}>
+                      {subtitle}
+                    </Text>
                   </Stack>
-                </Paper>
-              </Group>
-            </Paper>
 
-            <Group gap="sm" wrap="wrap">
-              {NAV_ITEMS.map((item) => {
-                const active =
-                  location.pathname === item.to ||
-                  location.pathname.startsWith(`${item.to}/`);
-                return (
-                  <Button
-                    key={item.key}
-                    variant={active ? "filled" : "subtle"}
-                    color={active ? "red" : "gray"}
-                    radius="xl"
-                    onClick={() => navigate(item.to)}
-                  >
-                    {item.label}
-                  </Button>
-                );
-              })}
-            </Group>
+                  <Paper radius="xl" p="lg" className="tone-panel" style={{ minWidth: 300 }}>
+                    <Text className="monospace-label" size="xs" c="dimmed" mb={8}>
+                      signal board
+                    </Text>
+                    <Stack gap="sm">
+                      {stats.map((stat) => (
+                        <Group key={stat.label} justify="space-between" wrap="nowrap">
+                          <Text size="sm" c="dimmed">
+                            {stat.label}
+                          </Text>
+                          <Text fw={800}>{stat.value}</Text>
+                        </Group>
+                      ))}
+                    </Stack>
+                  </Paper>
+                </Group>
+              </Paper>
+            )}
 
             <Box>{children}</Box>
           </Stack>

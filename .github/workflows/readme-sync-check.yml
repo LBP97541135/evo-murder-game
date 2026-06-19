@@ -3,6 +3,8 @@ name: README Sync Check
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
 
 jobs:
   check-readme-sync:
@@ -20,7 +22,22 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Run README sync check
+      - name: Run README sync check (PR mode)
+        if: github.event_name == 'pull_request'
         run: python scripts/check_readme_sync.py
         env:
           GITHUB_BASE_REF: ${{ github.base_ref }}
+          CHECK_MODE: block
+
+      - name: Run README sync check (Push mode — warn only)
+        if: github.event_name == 'push'
+        run: |
+          python scripts/check_readme_sync.py || {
+            echo "::warning::⚠️ 直接 push 到 main 但 README 未同步！请补上对应的 README 更新。"
+            # Push 模式无法阻止，但会发出警告
+            # 设置分支保护后，直接 push 会被 GitHub 本身拒绝
+            exit 0
+          }
+        env:
+          GITHUB_BASE_REF: "HEAD~1"
+          CHECK_MODE: warn

@@ -27,8 +27,8 @@ body {
 }
 
 @keyframes splashCtaIn {
-  from { opacity: 0; transform: translateY(28px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(28px); filter: drop-shadow(0 0 0px rgba(201, 42, 42, 0)); }
+  to   { opacity: 1; transform: translateY(0);    filter: drop-shadow(0 0 18px rgba(201, 42, 42, 0.8)); }
 }
 .splash-cta-in {
   animation: splashCtaIn 1.2s ease-out forwards;

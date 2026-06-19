@@ -13,11 +13,18 @@ export function SplashPage() {
   const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [phase, setPhase] = useState<Phase>("idle");
+  const [ctaVisible, setCtaVisible] = useState(false);
 
   const startVideo = () => {
     if (phase !== "idle") return;
     videoRef.current?.play();
     setPhase("playing");
+  };
+
+  const handleTimeUpdate = () => {
+    if (!ctaVisible && videoRef.current && videoRef.current.currentTime >= 14) {
+      setCtaVisible(true);
+    }
   };
 
   return (
@@ -37,6 +44,7 @@ export function SplashPage() {
         src={videoSrc}
         poster={posterImg}
         playsInline
+        onTimeUpdate={handleTimeUpdate}
         onEnded={() => setPhase("ended")}
         style={{
           position: "absolute",
@@ -68,12 +76,12 @@ export function SplashPage() {
         </div>
       )}
 
-      {/* 触碰以入局字体：水平居中、垂直居中偏上，视频结束后从下滑入 */}
-      {phase === "ended" && (
+      {/* 触碰以入局字体：水平居中、垂直居中偏上，第14秒开始滑入 */}
+      {ctaVisible && (
         <div
           style={{
             position: "absolute",
-            top: "38%",
+            top: "30%",
             left: "50%",
             transform: "translateX(-50%)",
           }}

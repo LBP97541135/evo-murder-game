@@ -117,6 +117,81 @@ curl -X POST http://localhost:10000/agents/register \
 
 > **注意**：`.venv/` 已加入 `.gitignore`，不会提交到仓库。每位协作者需自行创建虚拟环境。
 
+## 后端 API 总览
+
+后端已实现完整游戏流程，所有核心 API 测试通过。
+
+### 游戏引擎阶段流转
+
+```
+intro ──→ investigation ──→ voting ──→ reveal ──→ review
+ 开场介绍    自由调查       提交推理    真相揭示    复盘反思
+ (无条件)   (对话≥3轮)    (投票完成)   (无条件)    (终态)
+```
+
+### API 端点一览
+
+| 模块 | 端点 | 方法 | 功能 |
+|------|------|------|------|
+| **Health** | `/health` | GET | 健康检查 |
+| **Agent** | `/agents/register` | POST | 注册Agent（EvoMap/本地降级） |
+| | `/agents/list` | GET | 列出所有Agent |
+| | `/agents/heartbeat/{key}` | POST | 心跳保活 |
+| | `/agents/evolve/{key}` | POST | 更新constitution/identity_doc |
+| **剧本** | `/scripts/save` | POST | 保存剧本（含角色/证物/题目） |
+| | `/scripts/list` | GET | 剧本列表 |
+| | `/scripts/{id}` | GET | 剧本详情 |
+| | `/scripts/{id}` | DELETE | 删除剧本 |
+| **游戏** | `/game/create-session` | POST | 创建游戏Session |
+| | `/game/phase/{id}` | GET | 查询当前阶段信息 |
+| | `/game/phase/{id}/advance` | POST | 推进到下一阶段 |
+| | `/game/phase/{id}/force` | POST | 强制跳转阶段（DM权限） |
+| | `/game/vote/{id}` | POST | 提交推理投票（凶手+动机） |
+| | `/game/chat-count/{id}` | POST | 记录对话轮数 |
+| | `/game/broadcast/{id}` | POST | 广播消息 |
+| | `/game/reflect/{id}` | POST | 局后反思 |
+| **AI调用** | `/invoke/` | POST | 三层管道（initial→critique→refine） |
+| | `/invoke/stream` | POST | SSE流式响应 |
+| **证物** | `/evidence/script/{sid}/session/{ssid}` | GET | 查询证物列表 |
+| | `/evidence/create` | POST | 创建证物 |
+| | `/evidence/{id}` | PUT | 更新证物状态 |
+| | `/evidence/{id}` | DELETE | 删除证物 |
+| | `/evidence/present` | POST | 出示证物给角色 |
+| | `/evidence/combine` | POST | 组合证物 |
+| | `/evidence/{id}/presentations` | GET | 出示历史 |
+| | `/evidence/progress/{sid}` | GET | 游戏进度 |
+| | `/evidence/progress/{sid}/phase` | POST | 更新进度阶段 |
+| **对话** | `/conversations/save` | POST | 保存对话记录 |
+| | `/conversations/session/{id}` | GET | 查询对话历史 |
+| | `/conversations/session/{id}` | DELETE | 清除对话 |
+| **剧透** | `/spoiler-stories/save` | POST | 保存剧透故事 |
+| | `/spoiler-stories/{sid}` | GET | 剧透故事列表 |
+| | `/spoiler-stories/story/{id}` | GET | 剧透故事详情 |
+| | `/spoiler-stories/{id}` | PUT/DELETE | 更新/删除 |
+| **记忆** | `/memory/record` | POST | 记录经验 |
+| | `/memory/recall` | POST | 召回经验 |
+| | `/memory/status/{key}` | GET | 记忆概况 |
+
+### 最小可玩流程
+
+```
+注册Agent → 保存剧本 → 创建Session → 推进阶段(intro→investigation)
+→ AI对话 → 投票 → 揭示真相 → 复盘
+```
+
+### 待完善功能
+
+| 优先级 | 功能 | 说明 |
+|--------|------|------|
+| P0 | AI调用集成game_engine | 根据阶段动态调整prompt |
+| P0 | AI调用自动保存对话 | invoke路由里调conversations/save |
+| P1 | 后剧情模式 | 投票后重写凶手context，强制交代真相 |
+| P1 | DM提示系统 | 根据进度自动生成分级提示 |
+| P1 | 角色交互增强 | 证物出示反应、笔记分享反应 |
+| P2 | CrewAI Agent架构 | 替换当前AgentOrchestrator |
+| P2 | Agent自动进化触发 | 局后LLM自动改写constitution |
+| P2 | 多玩家支持 | 多人投票、按角色信息隔离 |
+
 ## 协作规范
 
 详见 [docs/协作规范.md](docs/协作规范.md)

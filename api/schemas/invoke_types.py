@@ -100,6 +100,8 @@ class AgentRegistrationResponse(BaseModel):
     claim_url: str = ""
     claim_code: str = ""
     status: str = "alive"
+    mode: str = "evomap"  # evomap / local
+    warning: str = ""
 
 
 class GameSessionRequest(BaseModel):

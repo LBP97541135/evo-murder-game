@@ -110,26 +110,54 @@ class AgentNode:
         self.registered = False
 
     def register(self, hub_url: str = "https://evomap.ai") -> dict:
-        """注册节点到 EvoMap 网络。注册成功后初始化专属 Client。"""
-        client = EvoMapClient(node_id="", node_secret="", hub_url=hub_url)
-        result = client.hello(
-            name=self.name,
-            capabilities={"domains": self.domains, "level": 1, "role": self.role.value},
-            model=self.model,
-            identity_doc=self.identity_doc,
-            constitution=self.constitution,
-        )
+        """注册节点到 EvoMap 网络。注册成功后初始化专属 Client。
 
-        if "node_id" in result and "node_secret" in result:
-            self.node_id = result["node_id"]
-            self.node_secret = result["node_secret"]
-            self.client = EvoMapClient(
-                node_id=self.node_id,
-                node_secret=self.node_secret,
-                hub_url=hub_url,
+        如果 EvoMap 不可用，仍允许本地注册（降级模式）。
+        """
+        try:
+            client = EvoMapClient(node_id="", node_secret="", hub_url=hub_url)
+            result = client.hello(
+                name=self.name,
+                capabilities={"domains": self.domains, "level": 1, "role": self.role.value},
+                model=self.model,
+                identity_doc=self.identity_doc,
+                constitution=self.constitution,
             )
-            self.registered = True
-        return result
+
+            if "error" in result:
+                # EvoMap 返回错误，降级为本地注册
+                self.node_id = f"local_{self.role.value}_{uuid.uuid4().hex[:8]}"
+                self.node_secret = f"local_secret_{uuid.uuid4().hex[:12]}"
+                self.registered = False
+                return {
+                    "node_id": self.node_id,
+                    "node_secret": self.node_secret,
+                    "mode": "local",
+                    "warning": f"EvoMap 注册失败: {result.get('error', 'unknown')}, 已降级为本地模式",
+                }
+
+            if "node_id" in result and "node_secret" in result:
+                self.node_id = result["node_id"]
+                self.node_secret = result["node_secret"]
+                self.client = EvoMapClient(
+                    node_id=self.node_id,
+                    node_secret=self.node_secret,
+                    hub_url=hub_url,
+                )
+                self.registered = True
+            return result
+
+        except Exception as e:
+            # 网络异常等，降级为本地注册
+            self.node_id = f"local_{self.role.value}_{uuid.uuid4().hex[:8]}"
+            self.node_secret = f"local_secret_{uuid.uuid4().hex[:12]}"
+            self.registered = False
+            return {
+                "node_id": self.node_id,
+                "node_secret": self.node_secret,
+                "mode": "local",
+                "warning": f"EvoMap 连接异常: {str(e)}, 已降级为本地模式",
+            }
 
     def heartbeat(self) -> dict:
         """发送心跳。"""
@@ -184,7 +212,10 @@ class AgentOrchestrator:
         return results
 
     def create_game_session(self, topic: str, script_name: str) -> dict:
-        """创建游戏 Session，邀请所有 Agent 参与。"""
+        """创建游戏 Session，邀请所有 Agent 参与。
+
+        如果 DM 未注册到 EvoMap（本地模式），则创建本地 Session。
+        """
         dm_agents = [a for a in self.agents.values() if a.role == AgentRole.DM]
         companion_agents = [a for a in self.agents.values() if a.role == AgentRole.COMPANION]
         assistant_agents = [a for a in self.agents.values() if a.role == AgentRole.ASSISTANT]
@@ -192,8 +223,28 @@ class AgentOrchestrator:
         if not dm_agents:
             return {"error": "no_dm_agent"}
 
-        # DM 创建 Session，邀请所有陪玩 Agent
         dm = dm_agents[0]
+
+        # 本地模式：DM 未注册到 EvoMap，创建本地 Session
+        if not dm.client:
+            session_id = f"local_session_{uuid.uuid4().hex[:8]}"
+            self.sessions[session_id] = {
+                "topic": topic,
+                "script_name": script_name,
+                "dm": dm.node_id,
+                "companions": [a.node_id for a in companion_agents],
+                "assistant": [a.node_id for a in assistant_agents],
+                "mode": "local",
+            }
+            for agent in companion_agents:
+                agent.session_id = session_id
+            return {
+                "session_id": session_id,
+                "mode": "local",
+                "warning": "EvoMap Session 不可用，已创建本地 Session",
+            }
+
+        # EvoMap 模式：DM 创建 Session，邀请所有陪玩 Agent
         participants = [a.node_id for a in companion_agents if a.registered]
         result = dm.client.create_session(
             topic=f"[剧本杀] {script_name} - {topic}",
@@ -208,12 +259,11 @@ class AgentOrchestrator:
                 "dm": dm.node_id,
                 "companions": participants,
                 "assistant": [a.node_id for a in assistant_agents if a.registered],
+                "mode": "evomap",
             }
-            # 所有 Agent 记录自己的 session
             for agent in companion_agents:
                 if agent.registered:
                     agent.session_id = session_id
-
         return result
 
     def broadcast_message(self, session_id: str, msg_type: str,

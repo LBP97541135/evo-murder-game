@@ -11,14 +11,14 @@ from api.schemas.invoke_types import (
     EvolutionUpdateRequest,
 )
 from api.agents.agent_orchestrator import AgentNode, AgentRole
-from api.main import orchestrator
+from api.orchestrator import orchestrator
 
 router = APIRouter()
 
 
 @router.post("/register", response_model=AgentRegistrationResponse)
 async def register_agent(req: AgentRegistrationRequest):
-    """注册一个新 Agent 到系统（同时注册到 EvoMap 网络）。"""
+    """注册一个新 Agent 到系统（同时尝试注册到 EvoMap 网络，失败则降级为本地模式）。"""
     role = AgentRole(req.role)
     agent = AgentNode(
         role=role,
@@ -30,15 +30,18 @@ async def register_agent(req: AgentRegistrationRequest):
     key = orchestrator.add_agent(agent)
     result = agent.register()
 
-    if "error" in result:
-        raise HTTPException(status_code=500, detail=result)
+    # 无论 EvoMap 是否成功，都返回注册结果
+    mode = result.get("mode", "evomap")
+    warning = result.get("warning", "")
 
     return AgentRegistrationResponse(
         node_id=agent.node_id or "",
         node_secret=agent.node_secret or "",
         claim_url=result.get("claim_url", ""),
         claim_code=result.get("claim_code", ""),
-        status="alive",
+        status="local" if mode == "local" else "alive",
+        mode=mode,
+        warning=warning,
     )
 
 

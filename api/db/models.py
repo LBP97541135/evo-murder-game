@@ -746,7 +746,13 @@ def get_engine():
 
 def init_db():
     """初始化数据库——创建所有表（幂等，仅新增不覆盖）。"""
+    import os
     engine = get_engine()
+    # 确保 SQLite 数据库目录存在
+    db_path = SQLITE_PATH
+    db_dir = os.path.dirname(db_path)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
     Base.metadata.create_all(engine)
     return engine
 

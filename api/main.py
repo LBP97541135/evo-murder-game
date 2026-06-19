@@ -13,7 +13,7 @@ from pathlib import Path
 
 from api.config.settings import DEBUG
 from api.db.models import init_db
-from api.agents.agent_orchestrator import AgentOrchestrator
+from api.orchestrator import orchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +38,6 @@ app.add_middleware(
 # 初始化数据库
 init_db()
 
-# 全局编排器
-orchestrator = AgentOrchestrator()
-
 # 静态文件（如有前端 build）
 static_dir = Path(__file__).parent.parent / "web" / "build"
 if static_dir.exists():
@@ -53,17 +50,21 @@ if static_dir.exists():
 from api.routes.health import router as health_router
 from api.routes.agents import router as agents_router
 from api.routes.invoke import router as invoke_router
+from api.routes.invoke_stream import router as invoke_stream_router
 from api.routes.game import router as game_router
 from api.routes.memory import router as memory_router
 from api.routes.scripts import router as scripts_router
 from api.routes.evidence import router as evidence_router
 from api.routes.spoiler_stories import router as spoiler_router
+from api.routes.conversations import router as conversations_router
 
 app.include_router(health_router)
 app.include_router(agents_router, prefix="/agents", tags=["agents"])
 app.include_router(invoke_router, prefix="/invoke", tags=["invoke"])
+app.include_router(invoke_stream_router, prefix="/invoke", tags=["invoke_stream"])
 app.include_router(game_router, prefix="/game", tags=["game"])
 app.include_router(memory_router, prefix="/memory", tags=["memory"])
 app.include_router(scripts_router, prefix="/scripts", tags=["scripts"])
 app.include_router(evidence_router, prefix="/evidence", tags=["evidence"])
 app.include_router(spoiler_router, prefix="/spoiler-stories", tags=["spoiler_stories"])
+app.include_router(conversations_router, prefix="/conversations", tags=["conversations"])

@@ -3,7 +3,7 @@ EvoMap Murder Game - Health Check Routes
 """
 
 from fastapi import APIRouter
-from api.main import orchestrator
+from api.orchestrator import orchestrator
 
 router = APIRouter()
 

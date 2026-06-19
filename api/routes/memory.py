@@ -7,7 +7,7 @@ EvoMap Murder Game - Memory & Evolution Routes
 from fastapi import APIRouter, HTTPException
 
 from api.schemas.invoke_types import MemoryRecordRequest, MemoryRecallRequest
-from api.main import orchestrator
+from api.orchestrator import orchestrator
 
 router = APIRouter()
 

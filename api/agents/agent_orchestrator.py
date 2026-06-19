@@ -21,7 +21,7 @@ import uuid
 from typing import Optional
 from enum import Enum
 
-from api.evomap_client import EvoMapClient
+from api.evomap.evomap_client import EvoMapClient
 
 
 # ============================

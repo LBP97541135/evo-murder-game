@@ -10,7 +10,7 @@ import json
 import logging
 from typing import Optional
 
-from api.settings import (
+from api.config.settings import (
     INFERENCE_SERVICE, MODEL, MAX_TOKENS, API_KEY,
     OLLAMA_URL, GROQ_API_BASE, OPENROUTER_API_BASE, OPENAI_API_BASE,
     EVOMAP_LLM_BASE_URL, EVOMAP_LLM_API_KEY,

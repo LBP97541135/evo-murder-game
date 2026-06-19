@@ -11,7 +11,7 @@ import json
 import httpx
 from typing import Optional
 
-from api.settings import EVOMAP_HUB_URL, EVOMAP_NODE_ID, EVOMAP_NODE_SECRET
+from api.config.settings import EVOMAP_HUB_URL, EVOMAP_NODE_ID, EVOMAP_NODE_SECRET
 
 
 class EvoMapClient:

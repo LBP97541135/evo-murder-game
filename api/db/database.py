@@ -7,8 +7,8 @@ PostgreSQL 连接池（生产）或 SQLite 回退（开发）。
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from api.settings import DB_CONN_URL, SQLITE_PATH
-from api.models import Base
+from api.config.settings import DB_CONN_URL, SQLITE_PATH
+from api.db.models import Base
 
 
 def initialize():

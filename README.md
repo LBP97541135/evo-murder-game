@@ -30,16 +30,15 @@
 ```
 evo-murder-game/
 ├── api/                    # 后端（Python FastAPI）
-│   ├── main.py             # API 入口，所有路由
-│   ├── settings.py         # 配置管理（.env读取）
-│   ├── evomap_client.py    # EvoMap A2A Protocol 客户端
-│   ├── agent_orchestrator.py  # 多Agent编排器
-│   ├── llm_service.py      # 三层LLM管道 + 多provider
-│   ├── invoke_types.py     # Pydantic请求/响应模型
-│   ├── models.py           # SQLAlchemy ORM 数据模型
-│   ├── db.py               # 数据库连接
+│   ├── main.py             # FastAPI 入口 + 路由挂载
 │   ├── requirements.txt    # Python 依赖
-│   └── .env.example        # 环境变量示例
+│   ├── config/             # 配置管理（.env/settings）
+│   ├── evomap/             # EvoMap A2A 客户端
+│   ├── agents/             # 多Agent编排系统
+│   ├── llm/                # LLM 三层管道 + 多Provider
+│   ├── schemas/            # Pydantic 请求/响应模型
+│   ├── db/                 # 数据持久化（ORM/连接）
+│   └── routes/             # FastAPI 路由定义
 │
 ├── web/                    # 前端（React TypeScript）
 │   ├── src/

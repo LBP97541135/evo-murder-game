@@ -13,7 +13,7 @@ from sqlalchemy.orm import DeclarativeBase, relationship, Session
 from datetime import datetime, timezone
 from typing import Optional
 
-from api.settings import DB_CONN_URL, SQLITE_PATH
+from api.config.settings import DB_CONN_URL, SQLITE_PATH
 
 
 class Base(DeclarativeBase):

@@ -1,36 +1,74 @@
 # api/ · README
 
 ## 职责
-后端 API 服务，基于 Python FastAPI。负责：
-- Agent 注册与生命周期管理（EvoMap hello/heartbeat）
-- 多Agent编排（Agent Orchestrator：DM/陪玩/助手）
-- 三层LLM管道（respond_initial → critique → refine）
-- 游戏Session创建与消息传递
-- Memory 记录与经验召回
-- constitution/identity_doc 改写（Agent进化）
-- 数据持久化（SQLAlchemy ORM）
+后端 API 服务，基于 Python FastAPI。
+负责所有后端逻辑：Agent 管理、EvoMap 通信、LLM 推理、游戏 Session、数据持久化。
+
+## 目录结构
+
+```
+api/
+├── main.py                 ← FastAPI 入口，app初始化 + 路由挂载
+├── requirements.txt        ← Python 依赖清单
+├── __init__.py             ← 包标记
+│
+├── config/                 ← 配置管理
+│   ├── settings.py         ← .env读取，所有配置变量
+│   ├── .env.example        ← 环境变量模板
+│   └── README.md
+│
+├── evomap/                 ← EvoMap A2A Protocol 客户端
+│   ├── evomap_client.py    ← 全端点封装（30+方法）
+│   ├── __init__.py
+│   └── README.md
+│
+├── agents/                 ← 多Agent编排系统
+│   ├── agent_orchestrator.py ← AgentNode + Orchestrator + 角色模板
+│   ├── __init__.py
+│   └── README.md
+│
+├── llm/                    ← LLM 推理服务
+│   ├── llm_service.py      ← 三层管道 + 5个Provider + 角色Prompt
+│   ├── __init__.py
+│   └── README.md
+│
+├── schemas/                ← Pydantic 数据模型
+│   ├── invoke_types.py     ← 所有请求/响应模型 + SafeActor
+│   ├── __init__.py
+│   └── README.md
+│
+├── db/                     ← 数据持久化
+│   ├── models.py           ← SQLAlchemy ORM 模型（6个表）
+│   ├── database.py         ← 连接引擎 + 初始化 + Session
+│   ├── __init__.py
+│   └── README.md
+│
+├── routes/                 ← FastAPI 路由定义
+│   ├── health.py           ← /health 健康检查
+│   ├── agents.py           ← /agents 注册/列表/心跳/进化
+│   ├── invoke.py           ← /invoke AI三层管道
+│   ├── game.py             ← /game Session/广播/复盘
+│   ├── memory.py           ← /memory 记录/召回/状态
+│   ├── __init__.py
+│   └── README.md
+│
+└── README.md               ← 本文件
+```
 
 ## 当前需求
-- [ ] 实际测试 evomap_client.py 所有端点调用
-- [ ] 完善三层LLM管道的 critique prompt（适配剧本杀场景）
-- [ ] 实现流式 SSE 输出（/invoke/stream）
-- [ ] 对接剧本数据（从文件/数据库加载）
-- [ ] 完善 Agent 注册流程（实际 EvoMap hello 调用）
+- [ ] 实际测试所有 EvoMap 端点调用
+- [ ] 实际测试三层 LLM 管道
+- [ ] 完善剧本 CRUD API
+- [ ] 实现流式 SSE 输出
+- [ ] 实现 constitution 自动改写逻辑
 
 ## 进度
-- ✅ settings.py 配置管理（.env读取、多provider URL）
-- ✅ evomap_client.py A2A协议全端点封装（hello/session/memory/publish/council/task）
-- ✅ agent_orchestrator.py 多Agent编排（注册/Session/自评/进化）
-- ✅ llm_service.py 三层管道 + 多provider支持
-- ✅ invoke_types.py Pydantic请求/响应模型
-- ✅ models.py SQLAlchemy数据模型（Script/Character/AgentNode/GameSession/EvolutionRecord）
-- ✅ main.py FastAPI入口 + 全部路由
-- ✅ db.py 数据库连接
-- 🔲 流式SSE实现
-- 🔲 剧本CRUD API
-- 🔲 图像生成API（复用火山引擎）
+- ✅ 项目结构从扁平 → 模块化拆分完成
+- ✅ 7个子目录，每个有 README（需求/进度/疑问）
+- ✅ 所有 import 路径更新完毕
+- ✅ main.py 只做初始化 + 路由挂载
+- ✅ routes 从 main.py 单体拆分为 5 个独立文件
 
 ## 疑问
-- EvoMap hello 端点的实际返回格式需要验证（文档和实际可能不一致）
-- curl 在 Windows 上访问 evomap.ai 有 SSL 问题，需使用 Python requests/httpx
-- 三层管道的 critique prompt 需要针对剧本杀场景定制（防剧透 vs 防bug）
+- 每个子目录的 README 中已列出各自的具体疑问
+- 最关键的阻塞点：EvoMap hello 端点的实际返回格式需要验证

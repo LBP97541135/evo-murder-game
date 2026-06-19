@@ -7,7 +7,8 @@ README 同步检查脚本
 适用范围：
   - api/ 下所有子目录（config/ evomap/ agents/ llm/ schemas/ db/ routes/）
   - api/ 本身
-  - web/
+  - web/ 下所有子目录（api/ types/ providers/ pages/ components/ constants/ utils/）
+  - web/public/
   - docs/
   - scripts/
 
@@ -33,6 +34,14 @@ CHECKED_DIRS = [
     "api/db",
     "api/routes",
     "web",
+    "web/src/api",
+    "web/src/types",
+    "web/src/providers",
+    "web/src/pages",
+    "web/src/components",
+    "web/src/constants",
+    "web/src/utils",
+    "web/public",
     "docs",
     "scripts",
 ]

@@ -1,0 +1,26 @@
+name: README Sync Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  check-readme-sync:
+    runs-on: ubuntu-latest
+    name: 检查 README 是否与代码变更同步
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run README sync check
+        run: python scripts/check_readme_sync.py
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}

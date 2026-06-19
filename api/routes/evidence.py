@@ -60,6 +60,10 @@ class EvidenceCombinationRequest(BaseModel):
     attemptedBy: str
 
 
+class PhaseUpdateRequest(BaseModel):
+    phase: str
+
+
 # ============================
 # 证物查询
 # ============================
@@ -455,8 +459,8 @@ async def get_game_progress(session_id: str):
 
 
 @router.post("/progress/{session_id}/phase")
-async def update_game_phase(session_id: str, phase: str):
-    """更新游戏阶段。"""
+async def update_game_phase(session_id: str, req: PhaseUpdateRequest):
+    """更新游戏阶段。请求体: {"phase": "investigation"}"""
     session = get_session()
     try:
         progress = session.query(GameProgressRecord).filter(
@@ -466,11 +470,11 @@ async def update_game_phase(session_id: str, phase: str):
         if not progress:
             raise HTTPException(status_code=404, detail="进度记录不存在")
 
-        progress.current_phase = phase
+        progress.current_phase = req.phase
         progress.last_activity = datetime.now(timezone.utc)
         session.commit()
 
-        return {"success": True, "message": f"游戏阶段已更新为: {phase}"}
+        return {"success": True, "message": f"游戏阶段已更新为: {req.phase}"}
     except HTTPException:
         raise
     except Exception as e:

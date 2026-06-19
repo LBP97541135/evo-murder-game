@@ -121,6 +121,36 @@ class GameEngine:
     def __init__(self):
         # 内存中的活跃游戏状态
         self._games: dict[str, dict] = {}
+        # 启动时从数据库恢复所有活跃游戏
+        self._load_from_db()
+
+    def _load_from_db(self) -> None:
+        """从数据库恢复所有活跃游戏状态到内存。"""
+        db_session = get_session()
+        try:
+            active_sessions = db_session.query(GameSession).filter(
+                GameSession.status == "active"
+            ).all()
+            for gs in active_sessions:
+                game_state = {
+                    "game_id": gs.session_id,
+                    "script_id": gs.script_id or "",
+                    "current_phase": gs.current_phase or GamePhase.INTRO,
+                    "phase_history": gs.phase_history or [],
+                    "votes": gs.result.get("votes", []) if gs.result else [],
+                    "vote_result": gs.result.get("vote_result") if gs.result else None,
+                    "started_at": gs.started_at.isoformat() if gs.started_at else "",
+                    "ended_at": gs.ended_at.isoformat() if gs.ended_at else None,
+                    "hints_used": gs.result.get("hints_used", 0) if gs.result else 0,
+                    "chat_count": gs.result.get("chat_count", 0) if gs.result else 0,
+                }
+                self._games[gs.session_id] = game_state
+            if active_sessions:
+                logger.info(f"从数据库恢复了 {len(active_sessions)} 个活跃游戏")
+        except Exception as e:
+            logger.error(f"从数据库恢复游戏状态失败: {e}")
+        finally:
+            db_session.close()
 
     def create_game(self, script_id: str, session_id: str = "") -> dict:
         """创建新游戏实例。"""
@@ -282,12 +312,14 @@ class GameEngine:
         game = self.get_game(game_id)
         if game:
             game["chat_count"] = game.get("chat_count", 0) + 1
+            self._sync_to_db(game)
 
     def record_hint(self, game_id: str) -> None:
         """记录一次提示使用。"""
         game = self.get_game(game_id)
         if game:
             game["hints_used"] = game.get("hints_used", 0) + 1
+            self._sync_to_db(game)
 
     def submit_vote(self, game_id: str, killer: str, motive: str = "", voter: str = "player") -> dict:
         """提交推理投票。"""

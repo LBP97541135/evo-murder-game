@@ -30,6 +30,9 @@ async def register_agent(req: AgentRegistrationRequest):
     key = orchestrator.add_agent(agent)
     result = agent.register()
 
+    # 持久化到数据库
+    orchestrator._save_agent_to_db(agent, key)
+
     # 无论 EvoMap 是否成功，都返回注册结果
     mode = result.get("mode", "evomap")
     warning = result.get("warning", "")
@@ -83,6 +86,9 @@ async def evolve_agent(agent_key: str, req: EvolutionUpdateRequest):
         agent.update_identity(req.new_content)
     else:
         raise HTTPException(status_code=400, detail="Invalid update_type")
+
+    # 持久化更新到数据库
+    orchestrator._save_agent_to_db(agent, agent_key)
 
     return {
         "agent_key": agent_key,

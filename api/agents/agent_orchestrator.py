@@ -18,10 +18,13 @@ Agent 角色体系：
 
 import time
 import uuid
+import logging
 from typing import Optional
 from enum import Enum
 
 from api.evomap.evomap_client import EvoMapClient
+
+logger = logging.getLogger(__name__)
 
 
 # ============================
@@ -197,6 +200,70 @@ class AgentOrchestrator:
         self.hub_url = hub_url
         self.agents: dict[str, AgentNode] = {}
         self.sessions: dict[str, dict] = {}
+        # 启动时从数据库恢复已注册的 Agent
+        self._load_agents_from_db()
+
+    def _load_agents_from_db(self) -> None:
+        """从数据库恢复已注册的 Agent 到内存。"""
+        try:
+            from api.db.models import get_session, AgentNode as AgentNodeModel
+            db_session = get_session()
+            try:
+                db_agents = db_session.query(AgentNodeModel).all()
+                for db_agent in db_agents:
+                    agent = AgentNode(
+                        role=AgentRole(db_agent.role),
+                        name=db_agent.name,
+                        model=db_agent.model,
+                        node_id=db_agent.node_id,
+                        node_secret=db_agent.node_secret,
+                        identity_doc=db_agent.identity_doc,
+                        constitution=db_agent.constitution,
+                    )
+                    agent.registered = (db_agent.status == "alive")
+                    key = f"{agent.role.value}_{agent.name}"
+                    self.agents[key] = agent
+                if db_agents:
+                    logger.info(f"从数据库恢复了 {len(db_agents)} 个 Agent")
+            finally:
+                db_session.close()
+        except Exception as e:
+            logger.error(f"从数据库恢复 Agent 失败: {e}")
+
+    def _save_agent_to_db(self, agent: AgentNode, key: str) -> None:
+        """将 Agent 信息持久化到数据库。"""
+        try:
+            from api.db.models import get_session, AgentNode as AgentNodeModel
+            db_session = get_session()
+            try:
+                db_agent = db_session.query(AgentNodeModel).filter(
+                    AgentNodeModel.node_id == agent.node_id
+                ).first()
+
+                if not db_agent:
+                    db_agent = AgentNodeModel(
+                        id=f"an_{uuid.uuid4().hex[:8]}",
+                        node_id=agent.node_id,
+                        node_secret=agent.node_secret,
+                    )
+                    db_session.add(db_agent)
+
+                db_agent.name = agent.name
+                db_agent.role = agent.role.value
+                db_agent.model = agent.model
+                db_agent.identity_doc = agent.identity_doc
+                db_agent.constitution = agent.constitution
+                db_agent.status = "alive" if agent.registered else "local"
+                db_agent.domains = agent.domains
+
+                db_session.commit()
+            except Exception as e:
+                db_session.rollback()
+                logger.error(f"保存 Agent 到数据库失败: {e}")
+            finally:
+                db_session.close()
+        except Exception as e:
+            logger.error(f"保存 Agent 到数据库失败（导入错误）: {e}")
 
     def add_agent(self, agent: AgentNode) -> str:
         """添加一个 Agent 到编排器（尚未注册）。"""

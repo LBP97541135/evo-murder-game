@@ -20,7 +20,7 @@
 | 层级 | 技术 |
 |------|------|
 | **后端** | Python 3.12+ · FastAPI · SQLAlchemy · Uvicorn |
-| **前端** | React 18 · TypeScript · Mantine UI 7 · React Router 7 |
+| **前端** | React 18 · TypeScript · Mantine UI 7 · React Router 7 · Create React App |
 | **AI 推理** | EvoMap LLM 中转站（OpenAI兼容） · 多 provider 支持 |
 | **Agent 协作** | EvoMap GEP-A2A 协议 · Session · Memory · Council |
 | **数据库** | SQLite（开发） / PostgreSQL（生产） |
@@ -41,16 +41,18 @@ evo-murder-game/
 │   └── routes/             # FastAPI 路由定义
 │
 ├── web/                    # 前端（React TypeScript）
+│   ├── figma-make/         # Figma Make 导出的独立视觉参考工程
 │   ├── src/
 │   │   ├── api/            # API调用封装
 │   │   ├── components/     # UI组件
-│   │   ├── pages/          # 页面
+│   │   ├── pages/          # 剧本库、游戏、Agent、个人助手页面
 │   │   ├── providers/      # 状态管理（constate）
 │   │   ├── types/          # TypeScript 类型定义
 │   │   ├── utils/          # 工具函数
 │   │   ├── constants/      # 常量
-│   │   ├── App.tsx         # 应用入口+路由
-│   │   └── index.tsx       # React入口
+│   │   ├── App.tsx         # Mantine 主题、Provider 和路由
+│   │   ├── index.tsx       # React 与 Mantine 样式入口
+│   │   └── styles.css      # 暗黑工业风全局样式
 │   ├── public/             # 静态资源
 │   ├── package.json        # 前端依赖
 │   └── tsconfig.json       # TypeScript配置
@@ -77,8 +79,16 @@ python -m uvicorn api.main:app --reload --port 10000
 ```bash
 cd web
 npm install
-npm start                    # 默认端口 5001，API指向 localhost:10000
+npm start                    # 默认端口 3000，API指向 localhost:10000
 ```
+
+当前前端是暗黑剧场风格的静态可交互原型，包含 `/library`、`/play/:id`、
+`/agents` 和 `/evolution` 四个主页面。页面演示数据目前定义在对应的页面组件内，
+尚未全部接入后端 API。
+
+`web/figma-make/` 是从 Figma Make 导出的独立 Vite 工程，仅用于视觉和布局参考，
+不参与 `web/` 主应用的 Create React App 构建。详细说明见
+[web/README.md](web/README.md) 和 [web/figma-make/README.md](web/figma-make/README.md)。
 
 ### 3. EvoMap Agent 注册
 
@@ -111,6 +121,7 @@ curl -X POST http://localhost:10000/agents/register \
 | 流式SSE | 流式对话输出 |
 | FastAPI骨架 | API服务基础架构 |
 | Mantine UI | 前端组件库 |
+| Figma Make 参考工程 | 暗黑剧场视觉方向、字体层级、卡片和页面布局参考 |
 
 新增内容（EvoMap 集成）：
 
@@ -121,7 +132,7 @@ curl -X POST http://localhost:10000/agents/register \
 | Memory Integration | 经验记录/召回驱动进化 |
 | Constitution Evolution | 行为宪章改写实现自我进化 |
 | Council Governance | 五阶段审议流程 |
-| Evolution Timeline UI | 进化可视化 |
+| 暗黑剧场前端原型 | 剧本库、游戏舞台、Agent 广场和个人助手中枢 |
 
 ## 许可
 

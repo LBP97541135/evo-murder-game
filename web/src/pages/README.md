@@ -1,60 +1,88 @@
-# web/src/pages/ · README
+# web/src/pages/ 目录 README
 
 ## 职责
-页面级组件——每个文件对应一个路由页面，是用户看到的完整界面。
-页面组件负责组合子组件、调用API、管理页面级状态。
 
-## 文件清单
+页面级组件目录。这里的文件直接对应站点的主路由页面，负责组合布局壳、数据面板和具体交互模块。
+
+## 当前文件
+
 | 文件 | 路由 | 说明 |
 |------|------|------|
-| `ScriptLibrary.tsx` | `/library` | 剧本库——浏览/搜索/筛选剧本 |
-| `GamePage.tsx` | `/play/:id` | 游戏主界面——角色对话/线索/推理（骨架） |
-| `AgentPanel.tsx` | `/agents` | Agent配置——注册Agent/查看状态 |
-| `EvolutionTimeline.tsx` | `/evolution` | 进化时间线——constitution改写/Memory记录（骨架） |
+| `StudioShell.tsx` | - | 全站共享布局壳，负责顶部栏、路由导航、Hero 与统计面板 |
+| `ScriptLibrary.tsx` | `/library` | 剧本库：浏览、搜索、筛选、推荐与详情 |
+| `GamePage.tsx` | `/play/:id` | 游戏主界面：模式切换、对局舞台、互动、节奏控制与复盘 |
+| `AgentPanel.tsx` | `/agents` | 陪玩 Agent 广场 + DM-Agent 广场 + 操作中心 |
+| `EvolutionTimeline.tsx` | `/evolution` | 个人助手中枢：画像、标签、推荐、总结、开局前助手 |
 
-## 页面功能详情
+## 共享约定
 
-### ScriptLibrary（P0，部分实现）
-- 剧本网格展示（SimpleGrid 3列）
-- 搜索栏（TextInput）
-- 难度/题材筛选（Select）
-- 点击剧本 → 进入游戏
-- 🔲 热门剧本/新上线剧本排序
-- 🔲 AI质检评分展示
+- 所有主页面使用 `StudioShell`，共享“暗夜剧场”品牌、顶部导航、
+  页面标题、说明文案和 signal board 统计区。
+- 页面主体使用 Mantine 的响应式 `Grid`、`SimpleGrid`、`Stack` 和 `Paper`。
+- 通用视觉类来自 `src/styles.css`，包括 `industrial-card`、`tone-panel`、
+  `tone-hero` 和 `monospace-label`。
+- 当前数据主要是文件内静态数组，交互状态由 React `useState` 管理。
+- 页面中的操作按钮目前用于展示流程和状态，不代表后端业务已经完成。
 
-### GamePage（骨架，P0 待实现）
-- 🔲 左侧：角色选择 + 对话界面（Actor组件）
-- 🔲 右侧：线索面板 + 笔记面板（TabbedRightPanel）
-- 🔲 底部：推理提交（选凶手→选动机→验证）
-- 🔲 DM控制区（阶段切换/提示发放）
-- 🔲 游戏复盘界面
+## 页面职责拆分
 
-### AgentPanel（部分实现）
-- Agent注册表单（角色/名称/注册按钮）
-- 已注册Agent列表（刷新/角色Badge/状态）
-- 🔲 Agent详情展开（constitution/identity_doc/记忆概况）
-- 🔲 心跳状态实时展示
-- 🔲 Agent进化参数配置
+### ScriptLibrary
 
-### EvolutionTimeline（骨架，P1 待实现）
-- 🔲 constitution 改写历史时间线
-- 🔲 Memory 记录卡片
-- 🔲 Gene/Capsule 发布记录
-- 🔲 从后端API获取数据
+- 剧本搜索
+- 题材与难度筛选
+- 精选 / 热门 / 新上线 / 推荐 / 好友玩过信息流
+- 主视觉剧本切换、标签和基础指标
+- 详情面板、情感/推理/恐怖进度和 Agent 适配
+- 推荐逻辑说明和玩家反馈
 
-## 当前需求
-- [ ] GamePage 完整实现（这是最核心的页面）
-- [ ] ScriptLibrary 对接后端API获取剧本列表
-- [ ] AgentPanel 对接后端API实现实际注册
-- [ ] EvolutionTimeline 对接后端API获取进化记录
+### GamePage
+
+- 单人模式 / 组队模式 / 快速开局
+- 剧情场景、章节进度和玩家状态
+- Agent 消息、行动选择和线索区域
+- DM 节奏控制、提示强度和阶段管理
+- 局后复盘、评价和摘要信息
+
+### AgentPanel
+
+- 陪玩 Agent 广场
+- DM-Agent 广场
+- 名称、标签、主动程度、剧本类型和主持节奏筛选
+- 评分、历史协作、成长标签和角色适配详情
+- 收藏 / 关注 / 邀请 / 屏蔽等操作入口
+- 阵容推荐和协作方式说明
+
+### EvolutionTimeline
+
+- 用户画像
+- 偏好标签、活跃数据和能力概况
+- 推荐策略、推荐理由和下一局建议
+- 最近游玩总结与行为变化
+- 开局前助手和准备事项
+
+### StudioShell
+
+- 统一站点品牌与导航
+- 根据当前 pathname 高亮路由
+- 提供页面 Hero、eyebrow、说明文案和统计数据插槽
+- 在桌面顶部导航之外提供页面内导航，保证窄屏可访问性
 
 ## 进度
-- ✅ 4个页面骨架完成
-- ✅ ScriptLibrary 基础UI（网格+搜索+筛选）
-- ✅ AgentPanel 注册表单 + Agent列表
-- 🔲 GamePage 完整实现
-- 🔲 EvolutionTimeline 数据对接
+
+- [x] 页面级骨架重构
+- [x] 四个主页面完成暗黑工业风布局
+- [x] 共享布局壳完成
+- [x] 页面搜索、筛选和面板切换可交互
+- [x] 修复共享标题中文乱码
+- [x] 本地构建通过
+- [x] 已参考 `web/figma-make` 的视觉方向，改为更强调主视觉、留白和图文层级的页面布局
+- [ ] 接入后端 API 和 Provider 状态
+- [ ] 将超大页面拆分为可复用业务组件
+- [ ] 增加路由级加载、错误和空状态
+- [ ] 增加交互测试与响应式视觉测试
 
 ## 疑问
-- GamePage 的布局——参考ai-murder-mystery的Home.tsx（左侧角色列表+中间对话+右侧线索面板）
-- 是否需要 Mantine AppShell 做全局导航栏？（Header + 侧边栏）
+
+- 页面演示数据接入后端后，筛选应由前端完成还是由 API 查询参数完成？
+- 游戏主界面是否需要拆分为独立的房间、对局和复盘路由？
+- Agent 收藏、邀请和屏蔽状态由本地缓存还是用户账户统一持久化？

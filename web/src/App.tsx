@@ -1,29 +1,58 @@
 /**
  * EvoMap Murder Game - App Entry
+ *
+ * Figma-inspired dark theatre shell.
  */
 
 import React from "react";
 import { MantineProvider, createTheme } from "@mantine/core";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import {
-  MysteryProvider,
-  SessionProvider,
-  ScriptProvider,
   AgentProvider,
+  MysteryProvider,
+  ScriptProvider,
+  SessionProvider,
 } from "./providers/contexts";
 
 import { ScriptLibrary } from "./pages/ScriptLibrary";
 import { GamePage } from "./pages/GamePage";
 import { AgentPanel } from "./pages/AgentPanel";
 import { EvolutionTimeline } from "./pages/EvolutionTimeline";
+import "./styles.css";
 
 const theme = createTheme({
-  primaryColor: "blue",
+  primaryColor: "red",
+  defaultRadius: "md",
+  fontFamily: "Crimson Pro, Georgia, serif",
+  headings: {
+    fontFamily: "Cinzel Decorative, Crimson Pro, Georgia, serif",
+    fontWeight: "700",
+  },
   colors: {
     dark: [
-      "#C1C2C5", "#A6A7AB", "#909296", "#5C5F66", "#373A40",
-      "#2C2E33", "#25262B", "#1A1B1E", "#141517", "#101113",
+      "#f0e8d8",
+      "#d8c7ab",
+      "#bfa789",
+      "#947563",
+      "#6b5248",
+      "#44302c",
+      "#2d1d1c",
+      "#1a1211",
+      "#120d0d",
+      "#0c0808",
+    ],
+    red: [
+      "#fff5f5",
+      "#ffe3e3",
+      "#ffc9c9",
+      "#ffa8a8",
+      "#ff8787",
+      "#ff6b6b",
+      "#fa5252",
+      "#f03e3e",
+      "#e03131",
+      "#c92a2a",
     ],
   },
 });

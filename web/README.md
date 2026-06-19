@@ -1,78 +1,119 @@
-# web/ · README
+# web/ 目录 README
 
 ## 职责
-前端 Web 应用，基于 React 18 + TypeScript + Mantine UI。
-负责所有用户可见的界面：剧本库、游戏主界面、Agent配置、进化时间线。
+
+`web/` 是进化酒馆的主前端应用，基于 React 18、TypeScript、
+Mantine UI 7、React Router 7 和 Create React App。
+
+当前版本是暗黑工业剧场风格的静态可交互原型，覆盖剧本选择、游戏舞台、
+Agent 阵容和个人助手四条主要用户路径。视觉方向参考 `figma-make/`，
+但主应用继续使用 Mantine，不直接复用参考工程的 Tailwind 和 Radix 组件。
 
 ## 目录结构
 
-```
+```text
 web/
-├── package.json            ← 依赖和脚本
-├── tsconfig.json           ← TypeScript配置
-│
-├── public/                 ← 静态资源（不经编译）
-│   ├── index.html          ← HTML入口
-│   ├── favicon.svg         ← 酒馆Logo
-│   └── README.md           ← 需求/进度/疑问
-│
+├── figma-make/             # 独立的 Figma Make/Vite 视觉参考工程
+├── public/                 # CRA 静态资源与 HTML 入口
 ├── src/
-│   ├── App.tsx             ← 应用入口 + 路由定义
-│   ├── index.tsx           ← React渲染入口
-│   ├── constants.ts        ← API_URL等根级常量
-│   │
-│   ├── api/                ← API调用封装
-│   │   ├── invoke.ts       ← 所有后端API封装（AI/Agent/Session/Memory/SafeActor）
-│   │   └── README.md
-│   │
-│   ├── types/              ← TypeScript类型定义
-│   │   ├── index.ts        ← 所有类型（Actor/SafeActor/Script/Character/Agent/GameSession/Evolution）
-│   │   └── README.md
-│   │
-│   ├── providers/          ← 状态管理（constate Context）
-│   │   ├── contexts.tsx    ← 4个Context（Mystery/Session/Script/Agent）
-│   │   └── README.md
-│   │
-│   ├── pages/              ← 页面组件
-│   │   ├── ScriptLibrary.tsx ← 剧本库
-│   │   ├── GamePage.tsx    ← 游戏主界面（骨架）
-│   │   ├── AgentPanel.tsx  ← Agent配置面板
-│   │   ├── EvolutionTimeline.tsx ← 进化时间线（骨架）
-│   │   └── README.md
-│   │
-│   ├── components/         ← 可复用UI组件（⚠️ 目录为空，待实现）
-│   │   └── README.md       ← 预期组件清单 + 优先级
-│   │
-│   ├── constants/          ← 常量定义（⚠️ 目录为空，待迁移）
-│   │   └── README.md
-│   │
-│   ├── utils/              ← 工具函数（⚠️ 目录为空，待实现）
-│   │   └── README.md       ← 预期工具清单 + 优先级
-│   │
-│   └── README.md           ← 本文件
-│
-└── README.md               ← 本文件
+│   ├── api/                # 后端 API 调用封装
+│   ├── components/         # 可复用业务组件预留目录
+│   ├── constants/          # 常量预留目录
+│   ├── pages/              # 四个主页面与共享 StudioShell
+│   ├── providers/          # constate 全局状态
+│   ├── types/              # TypeScript 类型
+│   ├── utils/              # 工具函数预留目录
+│   ├── App.tsx             # Mantine 主题、Provider 和路由
+│   ├── index.tsx           # React 入口及 Mantine 基础样式入口
+│   └── styles.css          # 全局字体、背景、卡片和氛围样式
+├── package.json
+└── tsconfig.json
 ```
 
-## 当前需求
-- [ ] 实现游戏主界面 GamePage（最核心）
-- [ ] 从 ai-murder-mystery 复用核心组件（Actor/ChatMessage/Header）
-- [ ] 对接后端所有API
-- [ ] 实现流式对话输出
-- [ ] 实现证据系统UI
+## 启动与构建
 
-## 进度
-- ✅ 项目骨架搭建
-- ✅ 类型定义完整
-- ✅ API层封装
-- ✅ 状态管理（4个Context）
-- ✅ 路由配置（4个页面）
-- ✅ 每个子目录都有 README
-- 🔲 组件实现（components/为空）
-- 🔲 工具函数实现（utils/为空）
-- 🔲 流式SSE
-- 🔲 证据系统
+```powershell
+cd web
+npm install
+npm start
+```
 
-## 疑问
-- GamePage布局参考 ai-murder-mystery 的 Home.tsx
-- 是否需要 Mantine AppShell 做全局导航？
+开发服务器默认地址为 `http://localhost:3000`，前端 API 地址为
+`http://localhost:10000`。`start` 脚本使用 Windows `set` 语法；
+在 PowerShell 执行策略限制 `npm.ps1` 时，可以使用 `npm.cmd start`。
+
+生产构建：
+
+```powershell
+cd web
+npm run build
+```
+
+## 应用入口
+
+- `src/index.tsx` 必须导入 `@mantine/core/styles.css`。缺少该入口时，
+  Mantine 组件只会保留不完整的基础外观。
+- `src/App.tsx` 创建暗色 Mantine 主题，定义红色强调色、正文和标题字体，
+  并挂载 Agent、Script、Session、Mystery 四层 Provider。
+- `src/styles.css` 提供暗色渐变、网格纹理、玻璃背景、工业卡片、
+  Hero 和等宽标签等跨页面样式。
+- 全局字体从 Google Fonts 加载；离线环境会回退到 Georgia 和 monospace。
+
+## 页面路由
+
+| 路由 | 页面 | 当前能力 |
+|------|------|----------|
+| `/` | 重定向 | 自动跳转到 `/library` |
+| `/library` | 剧本库 | 搜索、题材与难度筛选、推荐流、详情和 Agent 适配 |
+| `/play/:id` | 游戏主界面 | 模式切换、场景舞台、玩家互动、DM 节奏和复盘 |
+| `/agents` | Agent 广场 | 陪玩/DM 切换、搜索筛选、详情、阵容与操作入口 |
+| `/evolution` | 个人助手 | 用户画像、偏好标签、推荐、游玩总结和开局建议 |
+
+页面细节见 [src/pages/README.md](src/pages/README.md)。
+
+## 视觉规范
+
+- 背景以黑红、炭灰和旧纸色为主，红色只用于关键状态和主要操作。
+- 标题使用 `Cinzel Decorative`，正文使用 `Crimson Pro`，
+  数据标签使用 `JetBrains Mono`。
+- 页面使用统一的 `StudioShell`、Hero、统计面板和工业卡片。
+- 卡片强调边框、内高光、深阴影和轻度毛玻璃，不使用纯色平铺。
+- 桌面端提供完整顶部导航；窄屏通过页面内导航保持主要路由可达。
+
+## 数据状态
+
+当前四个页面主要使用组件内定义的演示数据，用于验证信息架构和视觉设计。
+`src/api/`、`src/providers/` 和类型层仍然保留，但新版页面尚未全部接入真实 API。
+因此按钮、筛选和面板切换可以交互，注册、匹配、聊天和持久化等业务流程仍需后续对接。
+
+## 参考工程
+
+`figma-make/` 是独立 Vite 工程，只承担视觉参考和设计溯源：
+
+- 不在 `src/` 内，不会被 CRA 和 TypeScript 主工程扫描。
+- 有自己的 `package.json`、入口、样式和组件依赖。
+- 不应从主应用直接 import 其中的源码。
+- 修改参考工程时，应在 `figma-make/` 内单独安装依赖和运行。
+
+## 当前进度
+
+- [x] 修复 Mantine 全局样式入口
+- [x] 建立暗黑工业剧场主题和全局样式
+- [x] 建立四个主路由及共享布局壳
+- [x] 完成剧本库静态交互原型
+- [x] 完成游戏舞台静态交互原型
+- [x] 完成 Agent 广场静态交互原型
+- [x] 完成个人助手静态交互原型
+- [x] 将 Figma Make 工程隔离到主应用源码目录之外
+- [x] 增加浏览器兼容目标和 Windows 启动脚本
+- [x] 主应用生产构建通过
+- [ ] 将页面演示数据替换为后端数据
+- [ ] 完成聊天、匹配、收藏、邀请和复盘持久化
+- [ ] 补充页面级测试与移动端视觉回归
+
+## 已知限制
+
+- `npm start` 当前是 Windows 专用脚本；跨平台运行需要改用 `cross-env`
+  或通过 shell 设置 `REACT_APP_API_URL`。
+- 外部封面图片和 Google Fonts 需要网络访问。
+- `figma-make/` 未安装依赖时无法直接执行 `npm run dev` 或 `npm run build`。

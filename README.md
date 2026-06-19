@@ -65,12 +65,27 @@ evo-murder-game/
 
 ## 快速开始
 
+> **环境要求**：Python 3.11+、Node.js 18+
+
 ### 1. 后端启动
 
 ```bash
-cd api
-pip install -r requirements.txt
-cp .env.example .env         # 编辑 .env 填入你的 API Key
+# 创建并激活虚拟环境（必须，确保团队依赖一致）
+python -m venv .venv
+
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
+
+# macOS / Linux
+# source .venv/bin/activate
+
+# 安装依赖（在虚拟环境中）
+pip install -r api/requirements.txt
+
+# 配置环境变量
+cp api/config/.env.example api/config/.env   # 编辑 .env 填入你的 API Key
+
+# 启动服务
 python -m uvicorn api.main:app --reload --port 10000
 ```
 
@@ -99,6 +114,8 @@ curl -X POST http://localhost:10000/agents/register \
   -H "Content-Type: application/json" \
   -d '{"role": "companion", "name": "小七", "model": "evomap-gemini-3.1-pro-preview"}'
 ```
+
+> **注意**：`.venv/` 已加入 `.gitignore`，不会提交到仓库。每位协作者需自行创建虚拟环境。
 
 ## 协作规范
 

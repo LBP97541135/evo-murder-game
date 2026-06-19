@@ -1,0 +1,46 @@
+# ============================
+# EvoMap Murder Game - Git Ignore
+# ============================
+
+# --- 红线：绝不提交 ---
+.env
+*.db
+murder_mystery.db
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+pip-log.txt
+.eggs/
+
+# --- Node.js / React ---
+node_modules/
+web/build/
+web/.env
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# --- EvoMap凭证 ---
+.evomap/
+node_id
+node_secret
+
+# --- 数据文件 ---
+data/
+*.sqlite3
+
+# --- 日志 ---
+*.log

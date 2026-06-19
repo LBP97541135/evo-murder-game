@@ -1,0 +1,28 @@
+# ============================
+# EvoMap Murder Game - Backend Dependencies
+# ============================
+
+# Web framework
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+
+# Database
+sqlalchemy>=2.0.0
+psycopg[binary]>=3.1.0
+psycopg_pool>=3.1.0
+
+# AI providers
+anthropic>=0.30.0
+openai>=1.30.0
+mistralai>=0.4.0
+
+# Utilities
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+json-repair>=0.25.0
+markdown2>=2.5.0
+httpx>=0.27.0
+nanoid>=2.0.0
+
+# Image generation (Volcengine)
+volcengine-python-sdk>=1.0.0

@@ -6,7 +6,7 @@
 
 import React from "react";
 import { MantineProvider, createTheme } from "@mantine/core";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
 
 import {
   AgentProvider,
@@ -15,6 +15,7 @@ import {
   SessionProvider,
 } from "./providers/contexts";
 
+import { SplashPage } from "./pages/SplashPage";
 import { ScriptLibrary } from "./pages/ScriptLibrary";
 import { ScriptDetailPage } from "./pages/ScriptDetailPage";
 import { GamePage } from "./pages/GamePage";
@@ -69,7 +70,7 @@ function App() {
             <SessionProvider>
               <MysteryProvider>
                 <Routes>
-                  <Route path="/" element={<Navigate to="/library" replace />} />
+                  <Route path="/" element={<SplashPage />} />
                   <Route path="/library" element={<ScriptLibrary />} />
                   <Route path="/library/:id" element={<ScriptDetailPage />} />
                   <Route path="/games" element={<MyGamesPage />} />

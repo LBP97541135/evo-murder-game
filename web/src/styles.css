@@ -18,6 +18,22 @@ body {
   font-family: "Crimson Pro", Georgia, serif;
 }
 
+/* Splash screen animations */
+@keyframes splashTitleOut {
+  to { opacity: 0; }
+}
+.splash-title-out {
+  animation: splashTitleOut 2s ease-out forwards;
+}
+
+@keyframes splashCtaIn {
+  from { opacity: 0; transform: translateY(28px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.splash-cta-in {
+  animation: splashCtaIn 1.2s ease-out forwards;
+}
+
 body::before {
   content: "";
   position: fixed;

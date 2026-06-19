@@ -1,0 +1,100 @@
+import React, { useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+
+/* eslint-disable @typescript-eslint/no-var-requires */
+const titleImg  = require("../video/暗夜剧场字体.png") as string;
+const ctaImg    = require("../video/触碰以入局字体.png") as string;
+const videoSrc  = require("../video/开屏幕动画.mp4") as string;
+const posterImg = require("../video/首帧画面.png") as string;
+
+type Phase = "idle" | "playing" | "ended";
+
+export function SplashPage() {
+  const navigate = useNavigate();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [phase, setPhase] = useState<Phase>("idle");
+
+  const startVideo = () => {
+    if (phase !== "idle") return;
+    videoRef.current?.play();
+    setPhase("playing");
+  };
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "#000",
+        overflow: "hidden",
+        cursor: phase === "idle" ? "pointer" : "default",
+      }}
+      onClick={startVideo}
+    >
+      {/* 背景视频，不循环，使用自带音轨 */}
+      <video
+        ref={videoRef}
+        src={videoSrc}
+        poster={posterImg}
+        playsInline
+        onEnded={() => setPhase("ended")}
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+        }}
+      />
+
+      {/* 暗夜剧场字体：水平垂直居中，播放开始后2秒淡出 */}
+      {phase !== "ended" && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            pointerEvents: "none",
+          }}
+        >
+          <img
+            src={titleImg}
+            alt=""
+            className={phase === "playing" ? "splash-title-out" : ""}
+            style={{ maxWidth: "60vw", objectFit: "contain" }}
+          />
+        </div>
+      )}
+
+      {/* 触碰以入局字体：水平居中、垂直居中偏上，视频结束后从下滑入 */}
+      {phase === "ended" && (
+        <div
+          style={{
+            position: "absolute",
+            top: "38%",
+            left: "50%",
+            transform: "translateX(-50%)",
+          }}
+        >
+          <img
+            src={ctaImg}
+            alt="触碰以入局"
+            className="splash-cta-in"
+            style={{
+              maxWidth: "40vw",
+              objectFit: "contain",
+              cursor: "pointer",
+              display: "block",
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate("/library");
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}

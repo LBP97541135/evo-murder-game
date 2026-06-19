@@ -55,9 +55,13 @@ from api.routes.agents import router as agents_router
 from api.routes.invoke import router as invoke_router
 from api.routes.game import router as game_router
 from api.routes.memory import router as memory_router
+from api.routes.scripts import router as scripts_router
+from api.routes.evidence import router as evidence_router
 
 app.include_router(health_router)
 app.include_router(agents_router, prefix="/agents", tags=["agents"])
 app.include_router(invoke_router, prefix="/invoke", tags=["invoke"])
 app.include_router(game_router, prefix="/game", tags=["game"])
 app.include_router(memory_router, prefix="/memory", tags=["memory"])
+app.include_router(scripts_router, prefix="/db", tags=["scripts"])
+app.include_router(evidence_router, prefix="/evidence", tags=["evidence"])

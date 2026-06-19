@@ -12,7 +12,8 @@ LLM 推理服务——三层 AI 管道（respond_initial → critique → refine
 | 文件 | 说明 |
 |------|------|
 | `llm_service.py` | 三层管道 + 5个Provider + 角色Prompt + invoke_with_pipeline |
-| `__init__.py` | 模块导出 |
+| `evidence_llm_service.py` | 证物出示AI反应生成（prompt构建 + 反应解析 + LLM调用占位） |
+| `__init__.py` | 模块导出（含 evidence_llm_service） |
 
 ## 三层管道详解
 

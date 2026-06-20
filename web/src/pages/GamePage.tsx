@@ -113,28 +113,28 @@ const ROLE_NAME_ALIASES: Record<string, string> = {
 };
 
 const PLAYER_NAME_ALIASES: Record<string, string> = {
-  user: "鏋楁檽闈?",
-  chen: "闄堝ⅷ",
-  crow: "鐧介甫",
-  su: "鑻忛",
-  echo: "鍥炲０",
-  "white-crow": "鐧介甫",
-  "paper-owl": "绾搁府",
-  flint: "鐕х煶",
-  "luna-moth": "鏈堣浘",
-  "night-cicada": "澶滆潐",
-  "mist-harbor": "闆炬腐涓荤悊浜?",
-  "candle-core": "鐑涜姱",
-  "iron-judge": "閾侀潰瑁佸喅鑰?",
-  "shadow-weaver": "褰辩粐鑰?",
+  user: "林晓青",
+  chen: "陈墨",
+  crow: "白鸦",
+  su: "苏颜",
+  echo: "回声",
+  "white-crow": "白鸦",
+  "paper-owl": "纸鸮",
+  flint: "燧石",
+  "luna-moth": "月蛾",
+  "night-cicada": "夜蝉",
+  "mist-harbor": "雾港主理人",
+  "candle-core": "暮烛引导员",
+  "iron-judge": "铁幕裁判",
+  "shadow-weaver": "影织者",
 };
 
 const ROLE_TO_INTRO_KEY: Record<string, string> = {
-  "鍛ㄩ噹": "user",
-  "椤炬矇": "chen",
-  "娌堢": "crow",
-  "鍛ㄥ矚": "su",
-  "绉﹂噹": "echo",
+  "周野": "user",
+  "顾沉": "chen",
+  "沈禾": "crow",
+  "周岚": "su",
+  "秦野": "echo",
 };
 
 function normalizeRoleToken(value: unknown) {
@@ -159,7 +159,7 @@ function getRolePortrait(role: unknown, fallback = "") {
 function resolvePlayerName(value: unknown, fallback = "") {
   const raw = String(value || "").trim();
   const normalized = normalizeRoleToken(raw);
-  return PLAYER_NAME_ALIASES[raw] || PLAYER_NAME_ALIASES[normalized] || fallback || raw || "鐜╁";
+  return PLAYER_NAME_ALIASES[raw] || PLAYER_NAME_ALIASES[normalized] || fallback || raw || "玩家";
 }
 
 type PublicEvent =

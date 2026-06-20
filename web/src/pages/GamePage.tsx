@@ -64,6 +64,20 @@ import {
 import { AgentCastingPanel } from "../components/AgentCastingPanel";
 import { StudioShell } from "./StudioShell";
 
+// ============================
+// 角色立绘
+// ============================
+
+const characterPortraits: Record<string, string> = {
+  "周野": new URL("../Character/周野.png", import.meta.url).href,
+  "顾沉": new URL("../Character/顾沉.png", import.meta.url).href,
+  "沈禾": new URL("../Character/沈禾.png", import.meta.url).href,
+  "周岚": new URL("../Character/周岚.png", import.meta.url).href,
+  "秦野": new URL("../Character/秦野.png", import.meta.url).href,
+};
+
+const dmPortrait = new URL("../video_picture/雾港主理人.png", import.meta.url).href;
+
 const scriptMap: Record<string, string> = {
   "iron-avenue": "锈铁大道",
   "black-archive": "黑匣档案馆",
@@ -797,12 +811,25 @@ function GamePage() {
           onClick={() => phase.id === "discussion" && openDiscussionDetail(event.id)}
         >
           <Group align="flex-start" wrap="nowrap">
+<<<<<<< HEAD
+            {(() => {
+              const speakerPlayer = GAME_PLAYERS.find((p) => p.name === event.speaker || `${p.name} Agent` === event.speaker);
+              const speakerPortrait = speakerPlayer ? characterPortraits[speakerPlayer.role] : undefined;
+              return speakerPortrait ? (
+                <Avatar src={speakerPortrait} size="sm" imageProps={{ style: { objectPosition: "top" } }} />
+              ) : (
+                <Avatar size="sm" color={event.tone}>{event.speaker.slice(0, 1)}</Avatar>
+              );
+            })()}
+            <Box><Text size="sm" fw={800} c={`${event.tone}.3`}>{event.speaker}</Text><Text size="sm" c="gray.3">{event.text}</Text></Box>
+=======
             <Avatar size="sm" color={event.tone}>{event.speaker.slice(0, 1)}</Avatar>
             <Box style={{ flex: 1 }}>
               <Text size="sm" fw={800} c={`${event.tone}.3`}>{event.speaker}</Text>
               <Text size="sm" c="gray.3" lh={1.65}>{event.text}</Text>
               {phase.id === "discussion" && <Text size="xs" c="dimmed" mt={6}>鐐瑰嚮鏌ョ湅鍙戣█璇︽儏</Text>}
             </Box>
+>>>>>>> 45115ae951f37312eb6d6648439e220503b86691
           </Group>
         </Paper>
       );
@@ -979,7 +1006,11 @@ function GamePage() {
                       className={voteSuspect === player.id ? "game-suspect-option is-selected" : "game-suspect-option"}
                     >
                       <Group wrap="nowrap">
-                        <Avatar color={player.color}>{player.role.slice(0, 1)}</Avatar>
+                        {characterPortraits[player.role] ? (
+                          <Avatar src={characterPortraits[player.role]} size={40} radius="xl" imageProps={{ style: { objectPosition: "top" } }} />
+                        ) : (
+                          <Avatar color={player.color}>{player.role.slice(0, 1)}</Avatar>
+                        )}
                         <Box style={{ flex: 1 }}>
                           <Text fw={900}>{player.role}</Text>
                           <Text size="xs" c="dimmed">{player.name}</Text>
@@ -1245,7 +1276,7 @@ function GamePage() {
                 <Box className="game-dm-anchor">
                   <Paper className="game-dm-header-card" radius="lg" px="sm" py={6}>
                     <Group gap="xs" wrap="nowrap">
-                      <Avatar size="sm" color={dm?.color || "red"}>{dm?.name.slice(0, 1)}</Avatar>
+                      <Avatar src={dmPortrait} size="sm" color={dm?.color || "red"} imageProps={{ style: { objectPosition: "top" } }}>{dm?.name.slice(0, 1)}</Avatar>
                       <Box className="game-dm-header-copy">
                         <Group gap={5}>
                           <Text size="xs" fw={900}>DM 路 {dm?.role}</Text>
@@ -1297,7 +1328,7 @@ function GamePage() {
                     return (
                       <Paper key={player.id} p="sm" radius="lg" className={classNames} onClick={() => setSelectedPlayerId(player.id)} style={{ cursor: "pointer" }}>
                         <Group wrap="nowrap">
-                          <Box className="game-avatar-wrap"><Avatar color={player.color}>{player.role.slice(0, 1)}</Avatar><Box className="game-online-dot" /></Box>
+                          <Box className="game-avatar-wrap">{characterPortraits[player.role] ? <Avatar src={characterPortraits[player.role]} size={40} radius="xl" imageProps={{ style: { objectPosition: "top" } }} /> : <Avatar color={player.color}>{player.role.slice(0, 1)}</Avatar>}<Box className="game-online-dot" /></Box>
                           <Box style={{ flex: 1, minWidth: 0 }}>
                             <Group gap={5}>
                               <Text fw={900} truncate>{player.role}</Text>
@@ -1551,12 +1582,31 @@ function GamePage() {
           }}
         >
           <Box className="game-intro-portrait" aria-hidden="true">
+<<<<<<< HEAD
             <Text className="monospace-label" size="xs" c="dimmed">character portrait</Text>
             <Text c="dimmed">瑙掕壊绔嬬粯鍗犱綅</Text>
+=======
+            {characterPortraits[introSpotlight.role] ? (
+              <img
+                src={characterPortraits[introSpotlight.role]}
+                alt={introSpotlight.role}
+                style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", objectPosition: "top" }}
+              />
+            ) : (
+              <>
+                <Text className="monospace-label" size="xs" c="dimmed">character portrait</Text>
+                <Text c="dimmed">角色立绘占位</Text>
+              </>
+            )}
+>>>>>>> d8cd0c1dbe7aeef883a706fea024dc80cf778d99
           </Box>
           <Paper className="game-intro-speech" radius="xl" p="lg">
             <Group gap="sm">
-              <Avatar color={introSpotlight.color}>{introSpotlight.role.slice(0, 1)}</Avatar>
+              {characterPortraits[introSpotlight.role] ? (
+                <Avatar src={characterPortraits[introSpotlight.role]} size={48} radius="xl" imageProps={{ style: { objectPosition: "top" } }} />
+              ) : (
+                <Avatar color={introSpotlight.color}>{introSpotlight.role.slice(0, 1)}</Avatar>
+              )}
               <Box>
                 <Title order={3}>{introSpotlight.role}</Title>
                 <Text size="sm" c="dimmed">{introSpotlight.name} 路 {introSpotlight.agent ? "AI 鐜╁" : "鐪熶汉鐜╁"}</Text>

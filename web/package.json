@@ -26,11 +26,11 @@
     "react-scripts": "^5.0.1"
   },
   "scripts": {
-    "start": "set \"REACT_APP_API_URL=http://localhost:10001\" && react-scripts start",
+    "start": "set \"REACT_APP_API_URL=http://localhost:8000\" && react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test"
   },
-  "proxy": "http://localhost:10001",
+  "proxy": "http://localhost:8000",
   "browserslist": {
     "production": [
       ">0.2%",

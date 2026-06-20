@@ -49,6 +49,9 @@ const agentPortraits: Record<string, string> = {
   "mist-harbor": new URL("../video_picture/雾港主理人.png", import.meta.url).href,
   "iron-judge": new URL("../video_picture/铁幕裁判.png", import.meta.url).href,
   "candle-core": new URL("../video_picture/暮烛引导员.png", import.meta.url).href,
+  "shadow-weaver": new URL("../video_picture/影织者.png", import.meta.url).href,
+  "lunar-moth": new URL("../video_picture/月蛾.png", import.meta.url).href,
+  "flint": new URL("../video_picture/燧石.png", import.meta.url).href,
 };
 
 // ============================

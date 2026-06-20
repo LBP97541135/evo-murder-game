@@ -75,13 +75,12 @@ export function SplashPage() {
         </div>
       )}
 
-      {/* 跳过动画：顶部居中白色文字，点击直接进入 */}
+      {/* 跳过动画：右下角白色文字，点击直接进入 */}
       <div
         style={{
           position: "absolute",
-          top: 24,
-          left: "50%",
-          transform: "translateX(-50%)",
+          bottom: 24,
+          right: 24,
           zIndex: 10,
         }}
       >

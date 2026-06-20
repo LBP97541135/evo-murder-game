@@ -23,6 +23,7 @@ import { AgentPanel } from "./pages/AgentPanel";
 import { EvolutionTimeline } from "./pages/EvolutionTimeline";
 import { MyGamesPage } from "./pages/MyGamesPage";
 import { ProfilePage } from "./pages/ProfilePage";
+import { ReviewPage } from "./pages/ReviewPage";
 import "./styles.css";
 
 const theme = createTheme({
@@ -78,6 +79,7 @@ function App() {
                   <Route path="/agents" element={<AgentPanel />} />
                   <Route path="/evolution" element={<EvolutionTimeline />} />
                   <Route path="/profile" element={<ProfilePage />} />
+                  <Route path="/review/:id" element={<ReviewPage />} />
                 </Routes>
               </MysteryProvider>
             </SessionProvider>

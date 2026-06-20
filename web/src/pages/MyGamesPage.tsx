@@ -223,7 +223,11 @@ function MyGamesPage() {
                       }
                       onClick={(event) => {
                         event.stopPropagation();
-                        navigate(`/play/${game.id}`);
+                        if (game.status === "进行中") {
+                          navigate(`/play/${game.id}`);
+                        } else {
+                          navigate(`/review/${game.id}`);
+                        }
                       }}
                     >
                       {game.status === "进行中" ? "继续游戏" : "查看游戏与复盘"}

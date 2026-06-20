@@ -39,6 +39,7 @@ class ScriptSaveRequest(BaseModel):
     coverImage: str = ""
     coverImageFilename: str = ""
     theme: str = "modern"
+    genre: str = "推理本"
     difficulty: str = "medium"
     duration: int = 120
     emotionLevel: float = 0.5
@@ -159,17 +160,90 @@ async def save_script(req: ScriptSaveRequest):
 
 
 @router.get("/list")
-async def list_scripts():
-    """获取所有剧本列表（按更新时间倒序）。"""
+async def list_scripts(
+    q: Optional[str] = Query(None, description="搜索关键词（标题/描述/作者）"),
+    genre: Optional[str] = Query(None, description="剧本题材：情感本/推理本/机制本/阵营本"),
+    difficulty: Optional[str] = Query(None, description="难度：easy/medium/hard"),
+    min_players: Optional[int] = Query(None, ge=1, description="最少人数"),
+    max_players: Optional[int] = Query(None, ge=1, description="最多人数"),
+    min_duration: Optional[int] = Query(None, ge=1, description="最短时长（分钟）"),
+    max_duration: Optional[int] = Query(None, ge=1, description="最长时长（分钟）"),
+    min_emotion: Optional[float] = Query(None, ge=0, le=1, description="最低情感浓度"),
+    max_inference: Optional[float] = Query(None, ge=0, le=1, description="最高推理难度"),
+    max_horror: Optional[float] = Query(None, ge=0, le=1, description="最高恐怖程度"),
+    sort_by: Optional[str] = Query(None, description="排序字段：updated_at/title/duration/emotion_level/inference_level"),
+    sort_order: Optional[str] = Query("desc", pattern="^(asc|desc)$", description="排序方向"),
+):
+    """获取剧本列表，支持搜索和多种筛选条件（按更新时间倒序）。"""
     session = get_session()
     try:
-        scripts = session.query(Script).order_by(Script.updated_at.desc()).all()
+        query = session.query(Script)
+
+        # 搜索关键词
+        if q:
+            keyword = f"%{q}%"
+            query = query.filter(
+                Script.title.ilike(keyword) |
+                Script.description.ilike(keyword) |
+                Script.author.ilike(keyword)
+            )
+
+        # 题材筛选
+        if genre:
+            query = query.filter(Script.genre == genre)
+
+        # 难度筛选
+        if difficulty:
+            query = query.filter(Script.difficulty == difficulty)
+
+        # 人数筛选
+        if min_players is not None:
+            query = query.filter(Script.player_count >= min_players)
+        if max_players is not None:
+            query = query.filter(Script.player_count <= max_players)
+
+        # 时长筛选
+        if min_duration is not None:
+            query = query.filter(Script.duration >= min_duration)
+        if max_duration is not None:
+            query = query.filter(Script.duration <= max_duration)
+
+        # 情感浓度
+        if min_emotion is not None:
+            query = query.filter(Script.emotion_level >= min_emotion)
+
+        # 推理难度
+        if max_inference is not None:
+            query = query.filter(Script.inference_level <= max_inference)
+
+        # 恐怖程度
+        if max_horror is not None:
+            query = query.filter(Script.horror_level <= max_horror)
+
+        # 排序
+        sort_field = getattr(Script, sort_by, None) if sort_by else None
+        if sort_field:
+            order = sort_field.asc() if sort_order == "asc" else sort_field.desc()
+        else:
+            order = Script.updated_at.desc()
+        query = query.order_by(order)
+
+        scripts = query.all()
         scripts_data = [script_to_dict(s) for s in scripts]
 
         return {
             "success": True,
             "scripts": scripts_data,
             "count": len(scripts_data),
+            "filters": {
+                "q": q,
+                "genre": genre,
+                "difficulty": difficulty,
+                "min_players": min_players,
+                "max_players": max_players,
+                "min_duration": min_duration,
+                "max_duration": max_duration,
+            },
         }
     except Exception as e:
         print(f"[scripts] 获取剧本列表失败: {e}")

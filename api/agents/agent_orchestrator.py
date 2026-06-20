@@ -111,6 +111,7 @@ class AgentNode:
         self.client: Optional[EvoMapClient] = None
         self.session_id: Optional[str] = None
         self.registered = False
+        self.persona_key: Optional[str] = None  # 人设库中的 key，如 "white-crow"
 
     def register(self, hub_url: str = "https://evomap.ai") -> dict:
         """注册节点到 EvoMap 网络。注册成功后初始化专属 Client。
@@ -270,6 +271,96 @@ class AgentOrchestrator:
         key = f"{agent.role.value}_{agent.name}"
         self.agents[key] = agent
         return key
+
+    def load_persona_to_agent(self, agent_key: str, persona_key: str) -> dict:
+        """从人设库加载人设到指定 Agent，融合 constitution 和 identity_doc。
+
+        Args:
+            agent_key: Agent 在编排器中的 key，如 "companion_白鸦"
+            persona_key: 人设库中的 key，如 "white-crow"
+
+        Returns:
+            加载结果，包含人设信息和融合后的 constitution/identity_doc
+        """
+        from api.agents.agent_persona_service import (
+            get_persona_by_key,
+            build_constitution_from_persona,
+            build_identity_doc_from_persona,
+        )
+
+        agent = self.agents.get(agent_key)
+        if not agent:
+            return {"error": "agent_not_found", "agent_key": agent_key}
+
+        persona = get_persona_by_key(persona_key)
+        if not persona:
+            return {"error": "persona_not_found", "persona_key": persona_key}
+
+        # 保存原始 constitution 作为基础
+        base_constitution = agent.constitution
+
+        # 融合人设到 constitution
+        agent.constitution = build_constitution_from_persona(persona, base_constitution)
+
+        # 融合人设到 identity_doc
+        agent.identity_doc = build_identity_doc_from_persona(persona)
+
+        # 记录人设 key
+        agent.persona_key = persona_key
+
+        # 持久化到数据库
+        self._save_agent_to_db(agent, agent_key)
+
+        logger.info(f"Agent [{agent_key}] 加载人设 [{persona_key}] 成功")
+        return {
+            "success": True,
+            "agent_key": agent_key,
+            "persona_key": persona_key,
+            "persona_name": persona["name"],
+            "constitution_length": len(agent.constitution),
+            "identity_doc_length": len(agent.identity_doc),
+        }
+
+    def auto_match_personas(self, script_genre: str = "", difficulty: str = "") -> dict:
+        """为所有 Agent 自动匹配最合适的人设。
+
+        根据剧本类型和难度，为每个角色类型的 Agent 匹配最佳人设。
+        """
+        from api.agents.agent_persona_service import match_personas_for_script
+
+        results = {}
+
+        # 为 DM 匹配人设
+        dm_agents = [(k, a) for k, a in self.agents.items() if a.role == AgentRole.DM]
+        if dm_agents:
+            dm_matches = match_personas_for_script(script_genre, difficulty, "dm", limit=1)
+            if dm_matches:
+                persona = dm_matches[0]
+                result = self.load_persona_to_agent(dm_agents[0][0], persona["key"])
+                results["dm"] = result
+
+        # 为 Companion 匹配人设
+        companion_agents = [(k, a) for k, a in self.agents.items() if a.role == AgentRole.COMPANION]
+        if companion_agents:
+            companion_matches = match_personas_for_script(
+                script_genre, difficulty, "companion", limit=len(companion_agents)
+            )
+            for i, (agent_key, _) in enumerate(companion_agents):
+                if i < len(companion_matches):
+                    persona = companion_matches[i]
+                    result = self.load_persona_to_agent(agent_key, persona["key"])
+                    results[f"companion_{i}"] = result
+
+        # 为 Assistant 匹配人设
+        assistant_agents = [(k, a) for k, a in self.agents.items() if a.role == AgentRole.ASSISTANT]
+        if assistant_agents:
+            asst_matches = match_personas_for_script(script_genre, difficulty, "assistant", limit=1)
+            if asst_matches:
+                persona = asst_matches[0]
+                result = self.load_persona_to_agent(assistant_agents[0][0], persona["key"])
+                results["assistant"] = result
+
+        return results
 
     def register_all(self) -> dict[str, dict]:
         """批量注册所有 Agent。返回每个 Agent 的注册结果。"""

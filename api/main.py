@@ -57,6 +57,7 @@ from api.routes.scripts import router as scripts_router
 from api.routes.evidence import router as evidence_router
 from api.routes.spoiler_stories import router as spoiler_router
 from api.routes.conversations import router as conversations_router
+from api.routes.capsules import router as capsules_router
 
 app.include_router(health_router)
 app.include_router(agents_router, prefix="/agents", tags=["agents"])
@@ -68,3 +69,4 @@ app.include_router(scripts_router, prefix="/scripts", tags=["scripts"])
 app.include_router(evidence_router, prefix="/evidence", tags=["evidence"])
 app.include_router(spoiler_router, prefix="/spoiler-stories", tags=["spoiler_stories"])
 app.include_router(conversations_router, prefix="/conversations", tags=["conversations"])
+app.include_router(capsules_router, prefix="/capsules", tags=["capsules"])

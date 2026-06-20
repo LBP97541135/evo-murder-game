@@ -5,6 +5,7 @@ EvoMap Murder Game - Conversation Routes
 """
 
 import uuid
+import logging
 from datetime import datetime, timezone
 from typing import Optional, List
 
@@ -12,6 +13,8 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from api.db.models import get_session, ConversationTurn
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -36,7 +39,7 @@ class ConversationSaveRequest(BaseModel):
 
 @router.post("/save")
 async def save_conversation(req: ConversationSaveRequest):
-    """保存一轮对话记录。"""
+    """保存一轮对话记录，同时写入 Agent 游戏状态的 chat_history。"""
     db_session = get_session()
     try:
         turn = ConversationTurn(
@@ -51,6 +54,21 @@ async def save_conversation(req: ConversationSaveRequest):
         )
         db_session.add(turn)
         db_session.commit()
+
+        # 同步到 Agent 游戏状态
+        try:
+            from api.agents.game_engine import game_engine
+            if req.final_response and req.actor_name:
+                game_engine.add_chat_to_agent(
+                    game_id=req.session_id,
+                    agent_key=req.actor_name,
+                    role=req.actor_name,
+                    content=req.final_response,
+                )
+                # 也记录到全局对话计数
+                game_engine.record_chat(game_id=req.session_id)
+        except Exception as sync_err:
+            logger.warning(f"同步到 Agent 游戏状态失败（可能游戏不存在）: {sync_err}")
 
         return {
             "success": True,

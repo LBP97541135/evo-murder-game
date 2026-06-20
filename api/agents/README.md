@@ -13,6 +13,7 @@
 | 文件 | 说明 |
 |------|------|
 | `agent_orchestrator.py` | AgentNode类 + AgentOrchestrator类 + AgentRole枚举 + AGENT_TEMPLATES模板 |
+| `agent_persona_service.py` | Agent人设库服务——预设人设初始化、查询、匹配、constitution/identity_doc生成 |
 | `__init__.py` | 模块导出 |
 
 ## Agent 角色体系

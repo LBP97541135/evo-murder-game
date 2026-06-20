@@ -336,9 +336,9 @@ export function ReviewPage() {
             variant="subtle"
             leftSection={<IconArrowLeft size={16} />}
             radius="xl"
-            onClick={() => navigate("/games")}
+            onClick={() => navigate("/genes")}
           >
-            返回我的游戏
+            返回基因广场
           </Button>
           <Group gap="xs">
             <Text className="monospace-label" size="xs" c="dimmed">

@@ -14,6 +14,7 @@ import {
 import {
   IconArrowLeft,
   IconClock,
+  IconPlayerPlay,
   IconRobot,
   IconStarFilled,
   IconUsers,
@@ -54,15 +55,25 @@ function ScriptDetailPage() {
       ]}
     >
       <Stack gap="xl">
-        <Button
-          variant="subtle"
-          color="gray"
-          leftSection={<IconArrowLeft size={17} />}
-          onClick={() => navigate("/library")}
-          style={{ alignSelf: "flex-start" }}
-        >
-          返回剧本库
-        </Button>
+        <Group justify="space-between">
+          <Button
+            variant="subtle"
+            color="gray"
+            leftSection={<IconArrowLeft size={17} />}
+            onClick={() => navigate("/library")}
+          >
+            返回剧本库
+          </Button>
+          <Button
+            radius="xl"
+            color="red"
+            size="lg"
+            leftSection={<IconPlayerPlay size={18} />}
+            onClick={() => navigate(`/play/${script.id}`)}
+          >
+            开始游戏
+          </Button>
+        </Group>
 
         <Grid gutter="xl" align="stretch">
           <Grid.Col span={{ base: 12, md: 4 }}>

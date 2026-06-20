@@ -21,7 +21,7 @@ import { ScriptDetailPage } from "./pages/ScriptDetailPage";
 import { GamePage } from "./pages/GamePage";
 import { AgentPanel } from "./pages/AgentPanel";
 import { EvolutionTimeline } from "./pages/EvolutionTimeline";
-import { MyGamesPage } from "./pages/MyGamesPage";
+import { GenePlazaPage } from "./pages/GenePlazaPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { ReviewPage } from "./pages/ReviewPage";
 import "./styles.css";
@@ -74,7 +74,7 @@ function App() {
                   <Route path="/" element={<SplashPage />} />
                   <Route path="/library" element={<ScriptLibrary />} />
                   <Route path="/library/:id" element={<ScriptDetailPage />} />
-                  <Route path="/games" element={<MyGamesPage />} />
+                  <Route path="/genes" element={<GenePlazaPage />} />
                   <Route path="/play/:id" element={<GamePage />} />
                   <Route path="/agents" element={<AgentPanel />} />
                   <Route path="/evolution" element={<EvolutionTimeline />} />

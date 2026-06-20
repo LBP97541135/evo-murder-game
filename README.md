@@ -191,16 +191,16 @@ intro ──→ investigation ──→ voting ──→ reveal ──→ review
 
 ### 待完善功能
 
-| 优先级 | 功能 | 说明 |
-|--------|------|------|
-| P0 | AI调用集成game_engine | 根据阶段动态调整prompt |
-| P0 | AI调用自动保存对话 | invoke路由里调conversations/save |
-| P1 | 后剧情模式 | 投票后重写凶手context，强制交代真相 |
-| P1 | DM提示系统 | 根据进度自动生成分级提示 |
-| P1 | 角色交互增强 | 证物出示反应、笔记分享反应 |
-| P2 | CrewAI Agent架构 | 替换当前AgentOrchestrator |
-| P2 | Agent自动进化触发 | 局后LLM自动改写constitution |
-| P2 | 多玩家支持 | 多人投票、按角色信息隔离 |
+| 优先级 | 功能 | 说明 | 状态 |
+|--------|------|------|------|
+| P0 | AI调用集成game_engine | 根据阶段动态调整prompt | ✅ 已完成 |
+| P0 | AI调用自动保存对话 | invoke路由里调conversations/save | ✅ 已完成 |
+| P1 | 后剧情模式 | 投票后自动触发凶手交代+DM真相揭晓 | ✅ 已完成 |
+| P1 | DM提示系统 | 根据进度自动生成分级提示（L1-L4） | ✅ 已完成 |
+| P1 | 角色交互增强 | 证物出示无预设反应时由LLM动态生成 | ✅ 已完成 |
+| P2 | CrewAI Agent架构 | 替换当前AgentOrchestrator | ❌ 待排期 |
+| P2 | Agent自动进化触发 | 局后LLM自动改写constitution | ✅ 已有基础逻辑 |
+| P2 | 多玩家支持 | 多人投票、按角色信息隔离 | ❌ 待排期 |
 
 ### 数据持久化
 

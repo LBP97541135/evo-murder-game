@@ -289,7 +289,9 @@ async def get_session_info(session_id: str):
         "speak_round": speak_round,
         "script_id": game.get("script_id", ""),
         "chat_count": game.get("chat_count", 0),
+        "hints_used": game.get("hints_used", 0),
         "vote_result": game.get("vote_result"),
+        "reveal_data": game.get("reveal_data"),   # 后剧情数据（REVEAL 阶段可用）
         "phase_history": game.get("phase_history", []),
         "started_at": game.get("started_at", ""),
     }
@@ -561,4 +563,47 @@ async def clear_force_answer(session_id: str):
     result = game_engine.clear_force_answer(session_id)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result)
+    return result
+
+
+# ============================
+# DM 分级提示系统
+# ============================
+
+class HintRequest(BaseModel):
+    level: int = 1           # 1-4
+    discussion_summary: str = ""
+    found_clues: list[str] = []
+    missed_clues: list[str] = []
+    suspects: list[str] = []
+
+
+@router.post("/hint/{session_id}")
+async def dm_generate_hint(session_id: str, req: HintRequest):
+    """DM 生成分级提示（L1-L4）。
+
+    L1 - 提醒目标
+    L2 - 遗漏信息
+    L3 - 推理方向
+    L4 - 强提示
+    """
+    game = game_engine.get_game(session_id)
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    context = {
+        "phase": game.get("current_phase", "unknown"),
+        "discussion_summary": req.discussion_summary,
+        "found_clues": req.found_clues,
+        "missed_clues": req.missed_clues,
+        "suspects": req.suspects,
+    }
+
+    result = orchestrator.dm_generate_hint(level=req.level, context=context)
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result)
+
+    if result.get("success"):
+        game_engine.record_hint(session_id)
+
     return result

@@ -18,7 +18,7 @@ import {
   IconStarFilled,
   IconUsers,
 } from "@tabler/icons-react";
-import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 import { useScript } from "../api/hooks";
 import { StudioShell } from "./StudioShell";
@@ -28,10 +28,18 @@ function ScriptDetailPage() {
   const navigate = useNavigate();
   const { script, loading, error } = useScript(id);
 
-  if (!script && !loading) {
-    return <Navigate to="/library" replace />;
+  if (!script) {
+    return (
+      <StudioShell title="剧本加载失败" subtitle="" eyebrow="backend error" stats={[]}>
+        <Paper radius="xl" p="xl" className="industrial-card">
+          <Text c={error ? "red" : "dimmed"}>
+            {loading ? "正在从后端加载剧本详情…" : `后端剧本详情加载失败：${error || "未知错误"}`}
+          </Text>
+          <Button mt="md" variant="light" onClick={() => navigate("/library")}>返回剧本库</Button>
+        </Paper>
+      </StudioShell>
+    );
   }
-  if (!script) return null;
 
   return (
     <StudioShell
@@ -46,13 +54,6 @@ function ScriptDetailPage() {
       ]}
     >
       <Stack gap="xl">
-        {(loading || error) && (
-          <Paper radius="xl" p="sm" className="industrial-card">
-            <Text size="sm" c={error ? "yellow" : "dimmed"}>
-              {loading ? "正在从后端加载剧本详情…" : `后端详情加载失败，当前展示本地数据：${error}`}
-            </Text>
-          </Paper>
-        )}
         <Button
           variant="subtle"
           color="gray"

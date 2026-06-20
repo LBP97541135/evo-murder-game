@@ -37,9 +37,9 @@ cd web
 npm install
 npm start
 ```
-
+c
 开发服务器默认地址为 `http://localhost:3000`，前端 API 地址为
-`http://localhost:10000`。`start` 脚本使用 Windows `set` 语法；
+`http://localhost:10001`。`start` 脚本使用 Windows `set` 语法；
 在 PowerShell 执行策略限制 `npm.ps1` 时，可以使用 `npm.cmd start`。
 
 生产构建：

@@ -590,9 +590,10 @@ function AgentCarousel({
 // ============================
 
 function AgentPanel() {
-  const [companionAgents, setCompanionAgents] = React.useState<CompanionAgent[]>(fallbackCompanionAgents);
-  const [dmAgents, setDmAgents] = React.useState<DMAgent[]>(fallbackDmAgents);
+  const [companionAgents, setCompanionAgents] = React.useState<CompanionAgent[]>([]);
+  const [dmAgents, setDmAgents] = React.useState<DMAgent[]>([]);
   const [backendStatus, setBackendStatus] = React.useState("正在加载后端 Agent 人设…");
+  const [backendError, setBackendError] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState<"playmate" | "dm" | "ensemble">(
     "playmate"
   );
@@ -641,10 +642,12 @@ function AgentPanel() {
         const dms = personas.filter((item) => item.role === "dm").map(toDm);
         if (companions.length) setCompanionAgents(companions);
         if (dms.length) setDmAgents(dms);
-        setBackendStatus(personas.length ? `已接入后端人设库，共 ${personas.length} 个 Agent` : "后端人设库为空，展示本地数据");
+        setBackendError(false);
+        setBackendStatus(personas.length ? `已接入后端人设库，共 ${personas.length} 个 Agent` : "后端人设库为空");
       })
       .catch((error) => {
-        setBackendStatus(`后端 Agent 加载失败，展示本地数据：${error instanceof Error ? error.message : String(error)}`);
+        setBackendError(true);
+        setBackendStatus(`后端 Agent 加载失败：${error instanceof Error ? error.message : String(error)}`);
       });
   }, []);
 
@@ -1513,7 +1516,7 @@ function AgentPanel() {
     >
       <Stack gap="xl">
         <Paper radius="xl" p="sm" className="industrial-card">
-          <Text size="sm" c="dimmed">{backendStatus}</Text>
+          <Text size="sm" c={backendError ? "red" : "dimmed"}>{backendStatus}</Text>
         </Paper>
         {/* 横向标签导航 */}
         {renderTabs()}

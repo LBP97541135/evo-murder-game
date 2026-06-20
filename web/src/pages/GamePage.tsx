@@ -53,9 +53,9 @@ import {
   createEvidence,
   createGameSession,
   forceGamePhase,
+  getGamePhase,
   getEvidences,
   presentEvidence,
-  recordAgentChat,
   saveConversation,
   submitGameVote,
 } from "../api/invoke";
@@ -174,7 +174,7 @@ function GamePage() {
   const [selectedScriptChapter, setSelectedScriptChapter] = React.useState(0);
   const [introduced, setIntroduced] = React.useState<string[]>([]);
   const [searchesLeft, setSearchesLeft] = React.useState(2);
-  const [evidence, setEvidence] = React.useState<Evidence[]>(INITIAL_EVIDENCE);
+  const [evidence, setEvidence] = React.useState<Evidence[]>([]);
   const [newEvidence, setNewEvidence] = React.useState<Evidence | null>(null);
   const [queue, setQueue] = React.useState<string[]>(["chen", "crow"]);
   const [currentSpeaker, setCurrentSpeaker] = React.useState<string | null>("chen");
@@ -185,7 +185,7 @@ function GamePage() {
   const [selectedPlayerId, setSelectedPlayerId] = React.useState<string | null>(null);
   const [targetId, setTargetId] = React.useState("crow");
   const [question, setQuestion] = React.useState("");
-  const [selectedEvidenceId, setSelectedEvidenceId] = React.useState(INITIAL_EVIDENCE[0].id);
+  const [selectedEvidenceId, setSelectedEvidenceId] = React.useState("");
   const [evidenceVisibility, setEvidenceVisibility] = React.useState("所有人");
   const [evidenceReason, setEvidenceReason] = React.useState("");
   const [privateThreads, setPrivateThreads] = React.useState(PRIVATE_THREADS);
@@ -221,12 +221,12 @@ function GamePage() {
     if (!sessionId) return;
     getEvidences(id, sessionId)
       .then((result) => {
-        if (result.evidences.length) {
-          setEvidence(result.evidences.map(backendEvidenceToGameEvidence));
-        }
+        const records = result.evidences.map(backendEvidenceToGameEvidence);
+        setEvidence(records);
+        setSelectedEvidenceId((current) => current || records[0]?.id || "");
       })
-      .catch(() => {
-        // New sessions can legitimately have no runtime evidence yet.
+      .catch((error) => {
+        showFeedback(`后端证物加载失败：${error instanceof Error ? error.message : String(error)}`);
       });
   }, [id, sessionId]);
 
@@ -256,19 +256,21 @@ function GamePage() {
 
   const confirmRoleSelection = async () => {
     if (!selectedRole) return;
-    setRoleConfirmed(true);
-    setPhaseIndex(1);
-    if (sessionId) {
-      showFeedback("角色已确认，继续使用已存在的后端游戏会话。");
-      return;
-    }
     try {
-      const session = await createGameSession(id, `剧本游戏：${scriptTitle}`);
-      setSessionId(session.sessionId);
-      window.localStorage.setItem(`game-session:${id}`, session.sessionId);
-      showFeedback(`角色已确认，后端游戏会话 ${session.sessionId} 已创建。`);
+      let activeSessionId = sessionId;
+      if (activeSessionId) {
+        await getGamePhase(activeSessionId);
+      } else {
+        const session = await createGameSession(id, `剧本游戏：${scriptTitle}`);
+        activeSessionId = session.sessionId;
+        setSessionId(activeSessionId);
+        window.localStorage.setItem(`game-session:${id}`, activeSessionId);
+      }
+      setRoleConfirmed(true);
+      setPhaseIndex(1);
+      showFeedback(`角色已确认，后端游戏会话 ${activeSessionId} 可用。`);
     } catch (error) {
-      showFeedback(`角色已确认；后端会话暂未创建，继续使用本地模式：${error instanceof Error ? error.message : String(error)}`);
+      showFeedback(`无法确认角色：后端游戏会话创建或恢复失败：${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
@@ -278,7 +280,7 @@ function GamePage() {
     return "voting";
   };
 
-  const goToPhase = (index: number) => {
+  const goToPhase = async (index: number) => {
     if (phase.id === "role-selection" && index > 0 && !roleConfirmed) {
       showFeedback("请先确认角色，选角完成后才能进入后续阶段。");
       return;
@@ -291,12 +293,17 @@ function GamePage() {
       showFeedback("请先完成当前阶段，不能跳过尚未完成的流程。");
       return;
     }
-    setPhaseIndex(index);
-    if (sessionId) {
-      forceGamePhase(sessionId, backendPhaseForIndex(index)).catch((error) => {
-        showFeedback(`页面阶段已切换，但后端同步失败：${error instanceof Error ? error.message : String(error)}`);
-      });
+    if (!sessionId) {
+      showFeedback("无法切换阶段：尚未创建后端游戏会话。");
+      return;
     }
+    try {
+      await forceGamePhase(sessionId, backendPhaseForIndex(index));
+    } catch (error) {
+      showFeedback(`后端阶段切换失败：${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    setPhaseIndex(index);
     setSpeakerSeconds(90);
     if (GAME_PHASES[index].id === "discussion") {
       setCurrentSpeaker("chen");
@@ -356,27 +363,28 @@ function GamePage() {
 
   const randomSearch = async () => {
     if (searchesLeft <= 0) return;
+    if (!sessionId) return showFeedback("搜证失败：尚未创建后端游戏会话。");
     const available = SEARCH_EVIDENCE.filter((item) => !evidence.some((owned) => owned.id === item.id));
     const found = available[Math.floor(Math.random() * available.length)] || SEARCH_EVIDENCE[0];
-    setEvidence((items) => [...items, found]);
-    setNewEvidence(found);
-    setSearchesLeft((value) => value - 1);
-    showFeedback(`搜证成功：获得“${found.name}”，已存入我的证物。`);
-    if (sessionId) {
-      try {
-        await createEvidence({
-          scriptId: id,
-          sessionId,
-          name: found.name,
-          basicDescription: found.description,
-          category: found.icon || "physical",
-          importance: "medium",
-          relatedActors: [],
-          discoveredBy: "player",
-        });
-      } catch (error) {
-        showFeedback(`已获得“${found.name}”，但证物写入后端失败：${error instanceof Error ? error.message : String(error)}`);
-      }
+    try {
+      const result = await createEvidence({
+        scriptId: id,
+        sessionId,
+        name: found.name,
+        basicDescription: found.description,
+        category: found.icon || "physical",
+        importance: "medium",
+        relatedActors: [],
+        discoveredBy: "player",
+      });
+      const saved = result.evidence ? backendEvidenceToGameEvidence(result.evidence) : found;
+      setEvidence((items) => [...items, saved]);
+      setSelectedEvidenceId((currentId) => currentId || saved.id);
+      setNewEvidence(saved);
+      setSearchesLeft((value) => value - 1);
+      showFeedback(`搜证成功：后端已保存“${saved.name}”。`);
+    } catch (error) {
+      showFeedback(`后端搜证失败：${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
@@ -394,8 +402,22 @@ function GamePage() {
 
   const showEvidence = async () => {
     if (!isUserSpeaking) return showFeedback("只有在自己发言时才能出示证物。");
+    if (!sessionId) return showFeedback("出示证物失败：尚未创建后端游戏会话。");
     const item = evidence.find((entry) => entry.id === selectedEvidenceId);
     if (!item) return;
+    const reason = evidenceReason.trim();
+    try {
+      await presentEvidence(
+        item.id,
+        evidenceVisibility === "指定角色" ? targetId : "all",
+        "player",
+        reason,
+        evidenceVisibility,
+      );
+    } catch (error) {
+      showFeedback(`后端出示证物失败：${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
     setEvidence((items) => items.map((entry) => entry.id === item.id ? { ...entry, visibility: evidenceVisibility as Evidence["visibility"] } : entry));
     addEvent({
       type: "evidence",
@@ -403,23 +425,9 @@ function GamePage() {
       evidence: { ...item, visibility: evidenceVisibility as Evidence["visibility"] },
       reason: evidenceReason.trim() || undefined,
     });
-    const reason = evidenceReason.trim();
     setDialog(null);
     setEvidenceReason("");
-    showFeedback(`已出示“${item.name}”，公开范围：${evidenceVisibility}。`);
-    if (sessionId) {
-      try {
-        await presentEvidence(
-          item.id,
-          evidenceVisibility === "指定角色" ? targetId : "all",
-          "player",
-          reason,
-          evidenceVisibility,
-        );
-      } catch (error) {
-        showFeedback(`证物已在页面出示，但后端记录失败：${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
+    showFeedback(`后端已记录出示“${item.name}”，公开范围：${evidenceVisibility}。`);
   };
 
   const acceptPrivateInvite = (playerId = targetId) => {
@@ -448,37 +456,38 @@ function GamePage() {
   const sendPublicMessage = async () => {
     if (!publicMessage.trim()) return;
     if (!isUserSpeaking) return showFeedback("当前没有公共发言权，请先进入发言队列。");
+    if (!sessionId) return showFeedback("发送失败：尚未创建后端游戏会话。");
     const content = publicMessage.trim();
-    addEvent({ type: "speech", speaker: "林晓青", text: content, tone: "orange" });
-    setPublicMessage("");
-    if (sessionId) {
-      await Promise.allSettled([
-        saveConversation({
-          sessionId,
-          actorName: "player",
-          chatMessages: [{ role: "user", content }],
-          finalResponse: content,
-        }),
-        recordAgentChat(sessionId, targetId || "player", content, "player"),
-      ]);
+    try {
+      await saveConversation({
+        sessionId,
+        actorName: "player",
+        chatMessages: [{ role: "user", content }],
+        finalResponse: content,
+      });
+      addEvent({ type: "speech", speaker: "林晓青", text: content, tone: "orange" });
+      setPublicMessage("");
+    } catch (error) {
+      showFeedback(`后端保存公开发言失败：${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
   const sendPrivateMessage = async () => {
     if (!privateMessage.trim() || !activeThread) return;
+    if (!sessionId) return showFeedback("发送失败：尚未创建后端游戏会话。");
     const content = privateMessage.trim();
-    setPrivateThreads((threads) => threads.map((thread) =>
-      thread.id === activeThread.id ? { ...thread, messages: [...thread.messages, `我：${content}`] } : thread,
-    ));
-    setPrivateMessage("");
-    if (sessionId) {
+    try {
       await saveConversation({
         sessionId,
         actorName: activeThread.playerId,
         chatMessages: [{ role: "user", content }],
-      }).catch((error) => {
-        showFeedback(`私聊已显示，但后端保存失败：${error instanceof Error ? error.message : String(error)}`);
       });
+      setPrivateThreads((threads) => threads.map((thread) =>
+        thread.id === activeThread.id ? { ...thread, messages: [...thread.messages, `我：${content}`] } : thread,
+      ));
+      setPrivateMessage("");
+    } catch (error) {
+      showFeedback(`后端保存私聊失败：${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
@@ -486,16 +495,14 @@ function GamePage() {
     if (!voteSuspect || !voteReason.trim() || voteEvidence.length === 0) {
       return showFeedback("请选择嫌疑人、填写推理理由并勾选至少一件关键证物。");
     }
-    setVoteSubmitted(true);
-    showFeedback("推理投票已提交。Agent 将独立提交推理，但不会替你修改选择。");
-    if (sessionId) {
-      try {
-        await forceGamePhase(sessionId, "voting");
-        const result = await submitGameVote(sessionId, voteSuspect, voteReason);
-        showFeedback(result.message || "推理投票已写入后端。");
-      } catch (error) {
-        showFeedback(`投票已在页面提交，但后端记录失败：${error instanceof Error ? error.message : String(error)}`);
-      }
+    if (!sessionId) return showFeedback("投票失败：尚未创建后端游戏会话。");
+    try {
+      await forceGamePhase(sessionId, "voting");
+      const result = await submitGameVote(sessionId, voteSuspect, voteReason);
+      setVoteSubmitted(true);
+      showFeedback(result.message || "推理投票已写入后端。");
+    } catch (error) {
+      showFeedback(`后端投票失败：${error instanceof Error ? error.message : String(error)}`);
     }
   };
 

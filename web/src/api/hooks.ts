@@ -2,10 +2,10 @@ import React from "react";
 
 import { backendScriptToCard } from "./adapters";
 import { getScript, listScripts, type BackendScript } from "./invoke";
-import { scripts as fallbackScripts, type ScriptCard } from "../pages/scriptData";
+import type { ScriptCard } from "../pages/scriptData";
 
 export function useScripts() {
-  const [scripts, setScripts] = React.useState<ScriptCard[]>(fallbackScripts);
+  const [scripts, setScripts] = React.useState<ScriptCard[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -31,8 +31,7 @@ export function useScripts() {
 }
 
 export function useScript(scriptId?: string) {
-  const fallback = fallbackScripts.find((item) => item.id === scriptId) || null;
-  const [script, setScript] = React.useState<ScriptCard | null>(fallback);
+  const [script, setScript] = React.useState<ScriptCard | null>(null);
   const [rawScript, setRawScript] = React.useState<BackendScript | null>(null);
   const [loading, setLoading] = React.useState(Boolean(scriptId));
   const [error, setError] = React.useState<string | null>(null);

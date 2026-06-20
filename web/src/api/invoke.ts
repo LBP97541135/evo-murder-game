@@ -29,14 +29,24 @@ async function request<T>(
   options: RequestInit = {},
   query?: Record<string, QueryValue>,
 ): Promise<T> {
-  const response = await fetch(endpoint(path, query), {
-    ...options,
-    headers: {
-      Accept: "application/json",
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...options.headers,
-    },
-  });
+  const requestUrl = endpoint(path, query);
+  let response: Response;
+  try {
+    response = await fetch(requestUrl, {
+      ...options,
+      headers: {
+        Accept: "application/json",
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...options.headers,
+      },
+    });
+  } catch (error) {
+    throw new ApiError(
+      `无法连接后端 ${requestUrl}：${error instanceof Error ? error.message : String(error)}`,
+      0,
+      error,
+    );
+  }
 
   const contentType = response.headers.get("content-type") || "";
   const payload = contentType.includes("application/json")
@@ -49,7 +59,9 @@ async function request<T>(
         ? (payload as { detail: unknown }).detail
         : payload;
     throw new ApiError(
-      typeof detail === "string" ? detail : `API request failed: ${response.status}`,
+      `${requestUrl} 返回 ${response.status}：${
+        typeof detail === "string" ? detail : JSON.stringify(detail)
+      }`,
       response.status,
       detail,
     );

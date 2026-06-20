@@ -196,8 +196,8 @@ function ScriptLibrary() {
       <Stack gap="xl">
         {(loading || error) && (
           <Paper radius="xl" p="sm" className="industrial-card">
-            <Text size="sm" c={error ? "yellow" : "dimmed"}>
-              {loading ? "正在从后端加载剧本…" : `后端剧本加载失败，当前展示本地数据：${error}`}
+            <Text size="sm" c={error ? "red" : "dimmed"}>
+              {loading ? "正在从后端加载剧本…" : `后端剧本加载失败：${error}`}
             </Text>
           </Paper>
         )}

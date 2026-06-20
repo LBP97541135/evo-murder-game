@@ -7,10 +7,10 @@
 
 - 后端请求字段统一使用 snake_case，前端页面继续使用 camelCase。
 - 字段转换、错误处理、查询参数和 SSE 解析集中在 `invoke.ts`。
-- 剧本和 Agent 页面采用“后端优先、本地数据降级”，便于后端未启动时继续开发 UI。
+- 后端请求失败时直接显示错误，不使用本地业务数据掩盖接口故障。
 - 游戏页创建 Session 后，将 `session_id` 保存到
   `localStorage["game-session:{scriptId}"]`。
-- `REACT_APP_API_URL` 控制后端地址，默认值为 `http://localhost:10000`。
+- `REACT_APP_API_URL` 控制后端地址，默认值为 `http://localhost:10001`。
 
 ## 页面接入情况
 
@@ -153,7 +153,7 @@
    FastAPI 无法稳定地从 query string 解析任意字典，建议后端增加 Pydantic body 模型。
 2. 后端游戏阶段为 `intro/investigation/voting/reveal/review`，前端展示阶段更细。
    当前通过映射和 `force` 接口同步；长期应由后端返回可配置的阶段模型。
-3. 创建游戏 Session 前必须至少注册一个 Agent，否则后端返回 400。前端会保留本地模式。
+3. 创建游戏 Session 前必须至少注册一个 Agent，否则后端返回 400，前端不会继续进入本地游戏模式。
 4. `MyGamesPage` 所需的游戏 Session 列表/详情接口目前不存在，因此仍使用展示数据。
 5. 用户、收藏、推荐、私聊线程、阵容持久化等功能目前没有后端接口。
 

@@ -171,6 +171,16 @@ intro ──→ investigation ──→ voting ──→ reveal ──→ review
 | **记忆** | `/memory/record` | POST | 记录经验 |
 | | `/memory/recall` | POST | 召回经验 |
 | | `/memory/status/{key}` | GET | 记忆概况 |
+| **发言轮次** | `/game/speak-round/{id}/init` | POST | 初始化发言轮次 |
+| | `/game/speak-round/{id}` | GET | 查询发言轮次状态 |
+| | `/game/speak-round/{id}/next` | POST | 下一个发言人 |
+| | `/game/speak-round/{id}/interject` | POST | 插队打断 |
+| | `/game/speak-round/{id}/new-round` | POST | 开始新一轮 |
+| **私聊** | `/game/private-chat/{id}/send` | POST | 发送私聊消息 |
+| | `/game/private-chat/{id}/{agent_key}` | GET | 获取私聊线程列表 |
+| | `/game/private-chat/{id}/thread/{tid}` | GET | 获取私聊消息历史 |
+| **强制回答** | `/game/force-answer/{id}` | POST | 指定Agent回答问题 |
+| | `/game/force-answer/{id}/clear` | POST | 清除强制回答状态 |
 
 ### 最小可玩流程
 

@@ -79,8 +79,8 @@ class InvocationRequest(BaseModel):
 class InvocationResponse(BaseModel):
     """AI 调用响应。"""
     original: str = ""
-    critique: str = ""
-    refined: str = ""
+    critique: Optional[str] = ""
+    refined: Optional[str] = ""
     final_response: str = ""
 
 

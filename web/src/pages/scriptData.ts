@@ -23,7 +23,7 @@ export type ScriptCard = {
 
 export const scripts: ScriptCard[] = [
   {
-    id: "iron-avenue",
+    id: "xiutie-avenue-missing-three-minutes",
     title: "锈铁大道",
     subtitle: "The Rusted Avenue",
     genre: "推理本",

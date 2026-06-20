@@ -58,14 +58,29 @@ async def save_conversation(req: ConversationSaveRequest):
         # 同步到 Agent 游戏状态
         try:
             from api.agents.game_engine import game_engine
+            from api.agents.game_context import find_agent_key
             if req.final_response and req.actor_name:
-                game_engine.add_chat_to_agent(
-                    game_id=req.session_id,
-                    agent_key=req.actor_name,
-                    role=req.actor_name,
-                    content=req.final_response,
-                )
-                # 也记录到全局对话计数
+                _game = game_engine.get_game(req.session_id)
+                _agent_key = find_agent_key(_game, req.actor_name) if _game else None
+
+                if _agent_key:
+                    game_engine.add_chat_to_agent(
+                        game_id=req.session_id,
+                        agent_key=_agent_key,
+                        role=req.actor_name,
+                        content=req.final_response,
+                    )
+                elif _game:
+                    for key in _game.get("agents", {}):
+                        if "dm" in key.lower():
+                            continue
+                        game_engine.add_chat_to_agent(
+                            game_id=req.session_id,
+                            agent_key=key,
+                            role=req.actor_name,
+                            content=req.final_response,
+                        )
+
                 game_engine.record_chat(game_id=req.session_id)
         except Exception as sync_err:
             logger.warning(f"同步到 Agent 游戏状态失败（可能游戏不存在）: {sync_err}")

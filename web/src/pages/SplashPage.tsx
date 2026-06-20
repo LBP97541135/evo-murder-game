@@ -42,9 +42,11 @@ export function SplashPage() {
         ref={videoRef}
         src={videoSrc}
         poster={posterImg}
+        preload="none"
         playsInline
         onTimeUpdate={handleTimeUpdate}
         onEnded={() => setPhase("ended")}
+        onError={() => { setPhase("ended"); setCtaVisible(true); }}
         style={{
           position: "absolute",
           inset: 0,

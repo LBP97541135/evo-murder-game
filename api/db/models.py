@@ -691,6 +691,8 @@ def dict_to_script(data: dict, script: Optional["Script"] = None) -> "Script":
     script.horror_level = data.get("horrorLevel", script.horror_level)
     script.player_count = data.get("playerCount", script.player_count)
     script.fixed_killer = data.get("fixedKiller", script.fixed_killer)
+    if not script.killer_role and script.fixed_killer:
+        script.killer_role = script.fixed_killer
 
     # 封面
     cover = data.get("coverImage", "")
@@ -826,6 +828,48 @@ def dict_to_spoiler_story(data: dict, script_id: str) -> "SpoilerStory":
             pass
 
     return story
+
+
+# ============================
+# 用户画像与偏好
+# ============================
+
+class UserProfile(Base):
+    """用户画像与偏好数据——供个人助手推荐使用。"""
+    __tablename__ = "user_profiles"
+
+    id = Column(String, primary_key=True)              # "user_default"
+    display_name = Column(String, default="玩家")
+    level = Column(String, default="Lv. 1")
+    avatar_url = Column(String, default="")
+
+    # 偏好画像
+    preferred_genres = Column(JSON, default=[])        # ["推理本", "情感本"]
+    preferred_difficulty = Column(String, default="medium")
+    preferred_duration = Column(String, default="3-5小时")
+    tags = Column(JSON, default=[])                    # ["推理优先", "偏合作", ...]
+    profile_data = Column(JSON, default={              # 详细画像
+        "推理能力倾向": "中高",
+        "表演参与度": "中",
+        "主动发言程度": "中低",
+        "合作偏好": "偏合作",
+        "高压盘问敏感度": "较高",
+        "喜欢的DM风格": "节奏清晰/提示克制",
+        "喜欢的陪玩风格": "稳、会接话、不抢戏",
+    })
+
+    # 统计数据
+    total_games = Column(Integer, default=0)
+    total_hours = Column(Integer, default=0)
+    completed_games = Column(Integer, default=0)
+    favorite_agents = Column(JSON, default=[])          # 常用 Agent key 列表
+
+    # 助手对话记录（简版）
+    assistant_chat_history = Column(JSON, default=[])   # [{role, content}, ...]
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
 
 
 def evidence_record_to_dict(evidence: "EvidenceRecord") -> dict:

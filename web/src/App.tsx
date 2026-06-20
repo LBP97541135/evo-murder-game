@@ -23,6 +23,8 @@ import { AgentPanel } from "./pages/AgentPanel";
 import { EvolutionTimeline } from "./pages/EvolutionTimeline";
 import { MyGamesPage } from "./pages/MyGamesPage";
 import { ProfilePage } from "./pages/ProfilePage";
+import { GenePlazaPage } from "./pages/GenePlazaPage";
+import { ReviewPage } from "./pages/ReviewPage";
 import "./styles.css";
 
 const theme = createTheme({
@@ -77,6 +79,8 @@ function App() {
                   <Route path="/play/:id" element={<GamePage />} />
                   <Route path="/agents" element={<AgentPanel />} />
                   <Route path="/evolution" element={<EvolutionTimeline />} />
+                  <Route path="/gene-plaza" element={<GenePlazaPage />} />
+                  <Route path="/review/:id" element={<ReviewPage />} />
                   <Route path="/profile" element={<ProfilePage />} />
                 </Routes>
               </MysteryProvider>

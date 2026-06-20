@@ -50,7 +50,7 @@ export function StudioShell({
   const isItemActive = (item: (typeof NAV_ITEMS)[number]) =>
     location.pathname === item.to ||
     location.pathname.startsWith(`${item.to}/`) ||
-    (item.key === "games" && location.pathname.startsWith("/play/"));
+    (item.key === "games" && (location.pathname.startsWith("/play/") || location.pathname.startsWith("/review/")));
 
   return (
     <AppShell className="studio-shell" header={{ height: 88 }} padding={0}>

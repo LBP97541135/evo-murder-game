@@ -23,7 +23,7 @@ import {
 
 const NAV_ITEMS = [
   { key: "library", label: "剧本库", to: "/library", icon: IconArchive },
-  { key: "genes", label: "基因广场", to: "/genes", icon: IconDeviceGamepad2 },
+  { key: "games", label: "我的游戏", to: "/games", icon: IconDeviceGamepad2 },
   { key: "agents", label: "Agent 广场", to: "/agents", icon: IconRobot },
   { key: "evolution", label: "个人助手", to: "/evolution", icon: IconBrain },
 ];
@@ -50,7 +50,7 @@ export function StudioShell({
   const isItemActive = (item: (typeof NAV_ITEMS)[number]) =>
     location.pathname === item.to ||
     location.pathname.startsWith(`${item.to}/`) ||
-    (item.key === "genes" && location.pathname.startsWith("/genes/"));
+    (item.key === "games" && location.pathname.startsWith("/play/"));
 
   return (
     <AppShell className="studio-shell" header={{ height: 88 }} padding={0}>

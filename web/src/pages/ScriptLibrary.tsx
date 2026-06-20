@@ -21,7 +21,6 @@ import {
   IconClock,
   IconCrown,
   IconHeart,
-  IconPlayerPlay,
   IconSearch,
   IconSparkles,
   IconStarFilled,
@@ -202,42 +201,6 @@ function ScriptLibrary() {
             </Text>
           </Paper>
         )}
-
-        {/* 继续上局游戏 — 红色细横条，检测未完成的游戏会话 */}
-        {(() => {
-          const activeIds = ["iron-avenue", "black-archive", "salt-ward", "mirror-parade"]
-            .filter((id) => window.localStorage.getItem(`game-session:${id}`));
-          if (activeIds.length === 0) return null;
-          const lastId = activeIds[0];
-          const titles: Record<string, string> = {
-            "iron-avenue": "锈铁大道",
-            "black-archive": "黑箱档案馆",
-            "salt-ward": "盐雾病房",
-            "mirror-parade": "镜面游行",
-          };
-          return (
-            <Paper
-              radius="xl"
-              py="sm"
-              px="lg"
-              style={{
-                background: "linear-gradient(90deg, rgba(201, 42, 42, 0.85), rgba(250, 82, 82, 0.55))",
-                cursor: "pointer",
-                border: "1px solid rgba(250, 82, 82, 0.4)",
-              }}
-              onClick={() => navigate(`/play/${lastId}`)}
-            >
-              <Group justify="center" gap="sm">
-                <IconPlayerPlay size={18} />
-                <Text fw={700} size="sm" style={{ letterSpacing: 1 }}>
-                  继续上局游戏
-                </Text>
-                <Badge variant="filled" color="red" size="sm">{titles[lastId] || lastId}</Badge>
-              </Group>
-            </Paper>
-          );
-        })()}
-
         <Paper radius="xl" p="lg" className="industrial-card">
           <Grid gutter="md" align="end">
             <Grid.Col span={{ base: 12, md: 5 }}>

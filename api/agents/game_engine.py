@@ -482,7 +482,10 @@ class GameEngine:
         return False
 
     def advance_phase(self, game_id: str) -> dict:
-        """推进到下一阶段，并触发记忆压缩。"""
+        """推进到下一阶段，并触发记忆压缩。
+
+        v2.2 新增：进入 REVEAL 阶段时自动触发后剧情（凶手交代 + DM 真相揭晓）。
+        """
         game = self.get_game(game_id)
         if not game:
             return {"error": "game_not_found"}
@@ -512,6 +515,11 @@ class GameEngine:
             game["ended_at"] = datetime.now(timezone.utc).isoformat()
             self._trigger_capsule_generation(game_id, game.get("script_id", ""))
 
+        # === 进入 REVEAL 阶段时自动触发生成后剧情数据 ===
+        reveal_data = None
+        if next_phase == GamePhase.REVEAL and current_phase == GamePhase.VOTING:
+            reveal_data = self._auto_post_game_reveal(game_id)
+
         # 同步到数据库
         self._sync_to_db(game)
 
@@ -523,6 +531,7 @@ class GameEngine:
             "display_name": next_config["display_name"],
             "phase_prompt": next_config["phase_prompt"],
             "allowed_actions": next_config["allowed_actions"],
+            "reveal": reveal_data,  # 附带后剧情数据，前端可直接使用
         }
 
     def _compress_all_agent_memories(self, game_id: str, phase_name: str) -> None:
@@ -1126,6 +1135,44 @@ class GameEngine:
             logger.info(f"复盘胶囊生成完成: game={game_id}, genes={len(result.get('genes', []))}, capsules={len(result.get('capsules', []))}")
         except Exception as e:
             logger.error(f"复盘胶囊生成失败: {e}")
+
+    def _auto_post_game_reveal(self, game_id: str) -> dict:
+        """从 VOTING 进入 REVEAL 时自动触发后剧情生成。
+
+        读取投票结果，调用 orchestrator.post_game_reveal() 生成：
+          - 凶手交代（LLM 生成）
+          - DM 真相揭晓（LLM 生成）
+        结果存入 game_state，前端可在 REVEAL 阶段直接获取。
+        """
+        game = self._games.get(game_id)
+        if not game:
+            return {"error": "game_not_found"}
+
+        vote_result = game.get("vote_result")
+        if not vote_result:
+            logger.warning(f"game={game_id} 无投票结果，无法生成后剧情")
+            return {"error": "no_vote_result"}
+
+        try:
+            from api.orchestrator import orchestrator
+
+            reveal_result = orchestrator.post_game_reveal(game_id, {
+                "killer": vote_result.get("killer", ""),
+                "motive": vote_result.get("motive", ""),
+                "voter": vote_result.get("voter", "player"),
+                "correct": vote_result.get("is_correct", False),
+                "script_type": game.get("script_id", ""),
+            })
+
+            # 存入 game_state 供前端查询
+            game["reveal_data"] = reveal_result
+
+            logger.info(f"game={game_id} 后剧情自动生成完成")
+            return reveal_result
+
+        except Exception as e:
+            logger.error(f"game={game_id} 后剧情自动生成失败: {e}")
+            return {"error": str(e)}
 
     def _load_capsules_for_agents(self) -> None:
         """新局开始前，为所有 Agent 搜索并消费历史胶囊，融入 constitution。"""

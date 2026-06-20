@@ -2,9 +2,11 @@
 EvoMap Murder Game - Evidence System Routes
 
 运行时证物系统：发现、出示、组合、状态查询。
+v2.2 新增：LLM 动态生成角色对证物的反应（无预设反应时自动调用）。
 """
 
 import uuid
+import logging
 from datetime import datetime, timezone
 from typing import Optional, List
 
@@ -17,6 +19,8 @@ from api.db.models import (
     EvidencePresentationRecord, EvidenceCombinationRecord, GameProgressRecord,
     evidence_record_to_dict, dict_to_evidence_record,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -235,7 +239,7 @@ async def update_evidence(evidence_id: str, req: EvidenceUpdateRequest):
 
 @router.post("/present")
 async def present_evidence(req: EvidencePresentationRequest):
-    """向角色出示证物（返回基础反应，AI 部分由前端层调用 LLM 完成）。"""
+    """向角色出示证物（优先使用预设反应，否则由 LLM 动态生成）。"""
     session = get_session()
     try:
         evidence = session.query(EvidenceRecord).filter(EvidenceRecord.id == req.evidenceId).first()
@@ -248,17 +252,71 @@ async def present_evidence(req: EvidencePresentationRequest):
             EvidenceReactionRecord.actor_name == req.presentedTo,
         ).first()
 
+        new_evidences = []
+        updated_info = []
+
         if reaction:
             reaction_type = reaction.reaction_type
             ai_response = reaction.basic_response
             new_evidences = reaction.breakthrough.get("unlock_evidences", []) if reaction.breakthrough else []
             updated_info = reaction.breakthrough.get("updated_info", []) if reaction.breakthrough else []
         else:
-            # 无预设反应时使用通用回应
-            reaction_type = "basic"
-            ai_response = f"对于{evidence.name}，我没有特别的信息可以提供。"
-            new_evidences = []
-            updated_info = []
+            # 无预设反应 → 使用 LLM 动态生成角色反应
+            reaction_type = "llm_generated"
+            try:
+                from api.llm.llm_service import respond_initial
+
+                # 获取被出示角色的游戏状态（从 game_engine）
+                from api.agents.game_engine import game_engine
+                agent_state = None
+                if evidence.session_id:
+                    game = game_engine.get_game(evidence.session_id)
+                    if game:
+                        for key, state in game.get("agents", {}).items():
+                            if state.character.get("name", "") == req.presentedTo:
+                                agent_state = state
+                                break
+
+                # 构建角色上下文
+                character_context = ""
+                if agent_state:
+                    ch = agent_state.character
+                    character_context = (
+                        f"角色名：{ch.get('name', '?')}\n"
+                        f"性格：{ch.get('personality', '无')}\n"
+                        f"简介：{ch.get('bio', '无')}\n"
+                        f"设定：{ch.get('context', '无')}\n"
+                    )
+                else:
+                    character_context = f"角色名：{req.presentedTo}\n"
+
+                llm_prompt = (
+                    f"你正在扮演一个剧本杀角色。以下是你的角色信息：\n"
+                    f"{character_context}\n"
+                    f"玩家向你出示了【{evidence.name}】。\n"
+                    f"证物描述：{evidence.basic_description or '无'}\n"
+                    f"详细描述：{evidence.detailed_description or evidence.deep_description or '无'}\n\n"
+                    f"请以角色的身份，用第一人称对出示的证物做出自然反应（50-100字）：\n"
+                    f"1. 你认识这个证物吗？\n"
+                    f"2. 你对此有什么反应？（惊讶/回避/承认/混淆等）\n"
+                    f"3. 你说出的话是否隐瞒了什么？\n"
+                    f"语气要贴合角色性格。注意：如果证物对角色不利，你可能会狡辩或转移话题。"
+                )
+
+                ai_response = respond_initial(
+                    system_prompt=(
+                        "你是剧本杀中的角色。你的回答必须符合角色性格和当前处境。\n"
+                        "玩家出示证物给你时，你的反应应该自然且有角色特色。\n"
+                        "不要直接承认自己是凶手，除非证物确凿且角色性格如此。"
+                    ),
+                    user_message=llm_prompt,
+                    temperature=0.8,
+                    max_tokens=300,
+                )
+            except Exception as llm_err:
+                logger.warning(f"LLM 证物反应生成失败: {llm_err}")
+                ai_response = f"（{req.presentedTo}看着{evidence.name}，神色有些复杂）嗯，这个证物我知道一些情况……但现在不方便多说。"
+                reaction_type = "basic"
 
         # 记录出示历史
         presentation = EvidencePresentationRecord(

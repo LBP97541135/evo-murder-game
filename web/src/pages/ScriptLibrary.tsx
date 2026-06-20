@@ -28,7 +28,7 @@ import {
 } from "@tabler/icons-react";
 import { useNavigate } from "react-router-dom";
 
-import { scripts } from "./scriptData";
+import { useScripts } from "../api/hooks";
 import { StudioShell } from "./StudioShell";
 
 const genreOptions = ["全部", "情感本", "推理本", "机制本", "阵营本"];
@@ -43,6 +43,7 @@ const feedOptions = [
 
 function ScriptLibrary() {
   const navigate = useNavigate();
+  const { scripts, loading, error } = useScripts();
   const hotScripts = scripts.filter((script) => script.hot);
   const [activeSlide, setActiveSlide] = React.useState(0);
   const [query, setQuery] = React.useState("");
@@ -52,13 +53,13 @@ function ScriptLibrary() {
 
   React.useEffect(() => {
     const timer = window.setInterval(
-      () => setActiveSlide((current) => (current + 1) % hotScripts.length),
+      () => setActiveSlide((current) => hotScripts.length ? (current + 1) % hotScripts.length : 0),
       5000,
     );
     return () => window.clearInterval(timer);
   }, [hotScripts.length]);
 
-  const featured = hotScripts[activeSlide];
+  const featured = hotScripts[activeSlide] || scripts[0];
   const filtered = scripts.filter((script) => {
     const keyword = query.trim().toLowerCase();
     const hitQuery =
@@ -78,10 +79,11 @@ function ScriptLibrary() {
   });
 
   const showSlide = (index: number) => {
+    if (!hotScripts.length) return;
     setActiveSlide((index + hotScripts.length) % hotScripts.length);
   };
 
-  const hero = (
+  const hero = featured ? (
     <Grid gutter="xl" align="stretch">
       <Grid.Col span={{ base: 12, lg: 8 }}>
         <Paper
@@ -187,11 +189,18 @@ function ScriptLibrary() {
         </Paper>
       </Grid.Col>
     </Grid>
-  );
+  ) : null;
 
   return (
     <StudioShell title="剧本库" subtitle="" eyebrow="" stats={[]} hero={hero}>
       <Stack gap="xl">
+        {(loading || error) && (
+          <Paper radius="xl" p="sm" className="industrial-card">
+            <Text size="sm" c={error ? "yellow" : "dimmed"}>
+              {loading ? "正在从后端加载剧本…" : `后端剧本加载失败，当前展示本地数据：${error}`}
+            </Text>
+          </Paper>
+        )}
         <Paper radius="xl" p="lg" className="industrial-card">
           <Grid gutter="md" align="end">
             <Grid.Col span={{ base: 12, md: 5 }}>

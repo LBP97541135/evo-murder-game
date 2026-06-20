@@ -48,6 +48,17 @@ import {
   SCRIPT_CHAPTERS,
   SEARCH_EVIDENCE,
 } from "./gameMockData";
+import { backendEvidenceToGameEvidence } from "../api/adapters";
+import {
+  createEvidence,
+  createGameSession,
+  forceGamePhase,
+  getEvidences,
+  presentEvidence,
+  recordAgentChat,
+  saveConversation,
+  submitGameVote,
+} from "../api/invoke";
 import { AgentCastingPanel } from "../components/AgentCastingPanel";
 import { StudioShell } from "./StudioShell";
 
@@ -142,6 +153,9 @@ function GamePage() {
   const { ref: fullscreenRef, toggle: toggleFullscreen, fullscreen } = useFullscreen();
 
   const [phaseIndex, setPhaseIndex] = React.useState(0);
+  const [sessionId, setSessionId] = React.useState(
+    () => window.localStorage.getItem(`game-session:${id}`) || "",
+  );
   const phase = GAME_PHASES[phaseIndex];
   const [selectedRole, setSelectedRole] = React.useState("");
   const [roleConfirmed, setRoleConfirmed] = React.useState(false);
@@ -203,6 +217,19 @@ function GamePage() {
     return () => window.clearInterval(timer);
   }, [currentSpeaker]);
 
+  React.useEffect(() => {
+    if (!sessionId) return;
+    getEvidences(id, sessionId)
+      .then((result) => {
+        if (result.evidences.length) {
+          setEvidence(result.evidences.map(backendEvidenceToGameEvidence));
+        }
+      })
+      .catch(() => {
+        // New sessions can legitimately have no runtime evidence yet.
+      });
+  }, [id, sessionId]);
+
   const playerById = (playerId: string | null) => GAME_PLAYERS.find((item) => item.id === playerId);
   const current = playerById(currentSpeaker);
   const isUserSpeaking = currentSpeaker === "user";
@@ -227,6 +254,30 @@ function GamePage() {
 
   const showFeedback = (text: string) => setFeedback(text);
 
+  const confirmRoleSelection = async () => {
+    if (!selectedRole) return;
+    setRoleConfirmed(true);
+    setPhaseIndex(1);
+    if (sessionId) {
+      showFeedback("角色已确认，继续使用已存在的后端游戏会话。");
+      return;
+    }
+    try {
+      const session = await createGameSession(id, `剧本游戏：${scriptTitle}`);
+      setSessionId(session.sessionId);
+      window.localStorage.setItem(`game-session:${id}`, session.sessionId);
+      showFeedback(`角色已确认，后端游戏会话 ${session.sessionId} 已创建。`);
+    } catch (error) {
+      showFeedback(`角色已确认；后端会话暂未创建，继续使用本地模式：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const backendPhaseForIndex = (index: number) => {
+    if (index <= 2) return "intro";
+    if (index <= 4) return "investigation";
+    return "voting";
+  };
+
   const goToPhase = (index: number) => {
     if (phase.id === "role-selection" && index > 0 && !roleConfirmed) {
       showFeedback("请先确认角色，选角完成后才能进入后续阶段。");
@@ -241,6 +292,11 @@ function GamePage() {
       return;
     }
     setPhaseIndex(index);
+    if (sessionId) {
+      forceGamePhase(sessionId, backendPhaseForIndex(index)).catch((error) => {
+        showFeedback(`页面阶段已切换，但后端同步失败：${error instanceof Error ? error.message : String(error)}`);
+      });
+    }
     setSpeakerSeconds(90);
     if (GAME_PHASES[index].id === "discussion") {
       setCurrentSpeaker("chen");
@@ -298,7 +354,7 @@ function GamePage() {
     showFeedback(`${introPlayer.name} 已完成自我介绍。`);
   };
 
-  const randomSearch = () => {
+  const randomSearch = async () => {
     if (searchesLeft <= 0) return;
     const available = SEARCH_EVIDENCE.filter((item) => !evidence.some((owned) => owned.id === item.id));
     const found = available[Math.floor(Math.random() * available.length)] || SEARCH_EVIDENCE[0];
@@ -306,6 +362,22 @@ function GamePage() {
     setNewEvidence(found);
     setSearchesLeft((value) => value - 1);
     showFeedback(`搜证成功：获得“${found.name}”，已存入我的证物。`);
+    if (sessionId) {
+      try {
+        await createEvidence({
+          scriptId: id,
+          sessionId,
+          name: found.name,
+          basicDescription: found.description,
+          category: found.icon || "physical",
+          importance: "medium",
+          relatedActors: [],
+          discoveredBy: "player",
+        });
+      } catch (error) {
+        showFeedback(`已获得“${found.name}”，但证物写入后端失败：${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   };
 
   const confirmForcedAnswer = () => {
@@ -320,7 +392,7 @@ function GamePage() {
     showFeedback(`${agent.name} 已被指定为下一位发言者，其他角色不可插队。`);
   };
 
-  const showEvidence = () => {
+  const showEvidence = async () => {
     if (!isUserSpeaking) return showFeedback("只有在自己发言时才能出示证物。");
     const item = evidence.find((entry) => entry.id === selectedEvidenceId);
     if (!item) return;
@@ -331,9 +403,23 @@ function GamePage() {
       evidence: { ...item, visibility: evidenceVisibility as Evidence["visibility"] },
       reason: evidenceReason.trim() || undefined,
     });
+    const reason = evidenceReason.trim();
     setDialog(null);
     setEvidenceReason("");
     showFeedback(`已出示“${item.name}”，公开范围：${evidenceVisibility}。`);
+    if (sessionId) {
+      try {
+        await presentEvidence(
+          item.id,
+          evidenceVisibility === "指定角色" ? targetId : "all",
+          "player",
+          reason,
+          evidenceVisibility,
+        );
+      } catch (error) {
+        showFeedback(`证物已在页面出示，但后端记录失败：${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   };
 
   const acceptPrivateInvite = (playerId = targetId) => {
@@ -359,27 +445,58 @@ function GamePage() {
     showFeedback(`已与 ${player.name} 建立私聊，公共发言队列未受影响。`);
   };
 
-  const sendPublicMessage = () => {
+  const sendPublicMessage = async () => {
     if (!publicMessage.trim()) return;
     if (!isUserSpeaking) return showFeedback("当前没有公共发言权，请先进入发言队列。");
-    addEvent({ type: "speech", speaker: "林晓青", text: publicMessage.trim(), tone: "orange" });
+    const content = publicMessage.trim();
+    addEvent({ type: "speech", speaker: "林晓青", text: content, tone: "orange" });
     setPublicMessage("");
+    if (sessionId) {
+      await Promise.allSettled([
+        saveConversation({
+          sessionId,
+          actorName: "player",
+          chatMessages: [{ role: "user", content }],
+          finalResponse: content,
+        }),
+        recordAgentChat(sessionId, targetId || "player", content, "player"),
+      ]);
+    }
   };
 
-  const sendPrivateMessage = () => {
+  const sendPrivateMessage = async () => {
     if (!privateMessage.trim() || !activeThread) return;
+    const content = privateMessage.trim();
     setPrivateThreads((threads) => threads.map((thread) =>
-      thread.id === activeThread.id ? { ...thread, messages: [...thread.messages, `我：${privateMessage.trim()}`] } : thread,
+      thread.id === activeThread.id ? { ...thread, messages: [...thread.messages, `我：${content}`] } : thread,
     ));
     setPrivateMessage("");
+    if (sessionId) {
+      await saveConversation({
+        sessionId,
+        actorName: activeThread.playerId,
+        chatMessages: [{ role: "user", content }],
+      }).catch((error) => {
+        showFeedback(`私聊已显示，但后端保存失败：${error instanceof Error ? error.message : String(error)}`);
+      });
+    }
   };
 
-  const submitVote = () => {
+  const submitVote = async () => {
     if (!voteSuspect || !voteReason.trim() || voteEvidence.length === 0) {
       return showFeedback("请选择嫌疑人、填写推理理由并勾选至少一件关键证物。");
     }
     setVoteSubmitted(true);
     showFeedback("推理投票已提交。Agent 将独立提交推理，但不会替你修改选择。");
+    if (sessionId) {
+      try {
+        await forceGamePhase(sessionId, "voting");
+        const result = await submitGameVote(sessionId, voteSuspect, voteReason);
+        showFeedback(result.message || "推理投票已写入后端。");
+      } catch (error) {
+        showFeedback(`投票已在页面提交，但后端记录失败：${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   };
 
   const playerStatus = (playerId: string) => {
@@ -654,11 +771,7 @@ function GamePage() {
           <Button
             radius="xl"
             disabled={!selectedRole}
-            onClick={() => {
-              setRoleConfirmed(true);
-              setPhaseIndex(1);
-              showFeedback("角色已确认并锁定，已进入阅读剧本阶段。");
-            }}
+            onClick={confirmRoleSelection}
           >
             {selectedRole ? "确认阵容并进入剧本" : "请先在圆桌中选择自己扮演的角色"}
           </Button>

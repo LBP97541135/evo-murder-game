@@ -20,17 +20,18 @@ import {
 } from "@tabler/icons-react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 
-import { scripts } from "./scriptData";
+import { useScript } from "../api/hooks";
 import { StudioShell } from "./StudioShell";
 
 function ScriptDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const script = scripts.find((item) => item.id === id);
+  const { script, loading, error } = useScript(id);
 
-  if (!script) {
+  if (!script && !loading) {
     return <Navigate to="/library" replace />;
   }
+  if (!script) return null;
 
   return (
     <StudioShell
@@ -45,6 +46,13 @@ function ScriptDetailPage() {
       ]}
     >
       <Stack gap="xl">
+        {(loading || error) && (
+          <Paper radius="xl" p="sm" className="industrial-card">
+            <Text size="sm" c={error ? "yellow" : "dimmed"}>
+              {loading ? "正在从后端加载剧本详情…" : `后端详情加载失败，当前展示本地数据：${error}`}
+            </Text>
+          </Paper>
+        )}
         <Button
           variant="subtle"
           color="gray"

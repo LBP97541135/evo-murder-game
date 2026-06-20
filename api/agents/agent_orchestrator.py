@@ -192,6 +192,92 @@ class AgentNode:
             return {"error": "not_registered"}
         return self.client.memory_recall(signals=signals, limit=limit)
 
+    # ============================
+    # 本地胶囊加载（从数据库）
+    # ============================
+
+    def load_local_capsules(self, limit: int = 5, min_score: float = 0.0) -> list[dict]:
+        """从本地数据库加载历史胶囊（EvolutionRecord）。
+
+        每个胶囊代表一次游戏的经验总结，包含评分、信号、摘要等。
+        这是 Agent 在开局时"回忆过去"的本地实现，不依赖 EvoMap 网络。
+
+        Args:
+            limit: 最多返回多少条
+            min_score: 最低评分过滤（只加载高质量经验）
+        Returns:
+            [{"capsule_id", "session_id", "signals", "score", "summary",
+              "update_type", "old_content", "new_content", "created_at"}, ...]
+        """
+        db_session = get_session()
+        try:
+            # 先查到本地的 AgentNodeDB id
+            db_agent = db_session.query(AgentNodeDB).filter_by(node_id=self.node_id).first()
+            if not db_agent:
+                return []
+
+            records = (
+                db_session.query(EvolutionRecord)
+                .filter(
+                    EvolutionRecord.agent_node_id == db_agent.id,
+                    EvolutionRecord.score >= min_score,
+                )
+                .order_by(EvolutionRecord.score.desc())
+                .limit(limit)
+                .all()
+            )
+
+            capsules = []
+            for r in records:
+                capsules.append({
+                    "capsule_id": r.id,
+                    "session_id": r.session_id,
+                    "signals": r.signals or [],
+                    "gene_id": r.gene_id or "",
+                    "score": r.score or 0.0,
+                    "summary": r.summary or "",
+                    "status": r.status or "",
+                    "update_type": r.update_type or "",
+                    "old_content": r.old_content or "",
+                    "new_content": r.new_content or "",
+                    "created_at": str(r.created_at) if r.created_at else "",
+                })
+            return capsules
+        except Exception as e:
+            logger.error(f"Failed to load capsules for agent {self.name}: {e}")
+            return []
+        finally:
+            db_session.close()
+
+    def get_capsule_context_prompt(self, capsules: list[dict] = None) -> str:
+        """将加载的胶囊格式化为 constitution 增强提示。
+
+        在游戏开局时，这个提示可以注入到 Agent 的 system prompt 中，
+        让 Agent 基于历史经验调整本局行为。
+        """
+        if capsules is None:
+            capsules = self.load_local_capsules(limit=5, min_score=0.5)
+
+        if not capsules:
+            return ""
+
+        lines = ["\n【历史经验胶囊】"]
+        for i, cap in enumerate(capsules, 1):
+            score = cap.get("score", 0)
+            summary = cap.get("summary", "")[:100]
+            signals = ", ".join(cap.get("signals", [])[:3])
+            update = cap.get("new_content", "")
+            if update:
+                update = update[:80].replace("\n", " ")
+            lines.append(
+                f"  {i}. 评分{score:.1f} | 标签:{signals} | {summary}"
+            )
+            if update:
+                lines.append(f"     学到的策略: {update}")
+
+        lines.append("【请基于以上历史经验调整本局策略】\n")
+        return "\n".join(lines)
+
 
 class AgentOrchestrator:
     """多Agent编排器：管理一组 Agent 的注册、Session 创建和任务调度。"""
@@ -281,6 +367,9 @@ class AgentOrchestrator:
     def create_game_session(self, topic: str, script_name: str) -> dict:
         """创建游戏 Session，邀请所有 Agent 参与。
 
+        自动为每个 Agent 从数据库加载历史胶囊，
+        作为本局行为的经验参考。
+
         如果 DM 未注册到 EvoMap（本地模式），则创建本地 Session。
         """
         dm_agents = [a for a in self.agents.values() if a.role == AgentRole.DM]
@@ -292,7 +381,23 @@ class AgentOrchestrator:
 
         dm = dm_agents[0]
 
-        # 本地模式：DM 未注册到 EvoMap，创建本地 Session
+        # ========== 开局加载胶囊 ==========
+        # 为每个 Agent 从数据库加载历史胶囊，作为经验提示
+        capsule_map: dict[str, list[dict]] = {}
+        capsule_contexts: dict[str, str] = {}
+        for key, agent in self.agents.items():
+            if agent.registered and agent.node_id:
+                capsules = agent.load_local_capsules(limit=5, min_score=0.3)
+                if capsules:
+                    capsule_map[key] = capsules
+                    capsule_contexts[key] = agent.get_capsule_context_prompt(capsules)
+                    logger.info(
+                        f"Agent {key} 开局加载了 {len(capsules)} 条历史胶囊"
+                    )
+
+        # ========== 创建 Session ==========
+
+        # 本地模式
         if not dm.client:
             session_id = f"local_session_{uuid.uuid4().hex[:8]}"
             self.sessions[session_id] = {
@@ -302,16 +407,20 @@ class AgentOrchestrator:
                 "companions": [a.node_id for a in companion_agents],
                 "assistant": [a.node_id for a in assistant_agents],
                 "mode": "local",
+                "capsule_count": {
+                    k: len(v) for k, v in capsule_map.items()
+                },
             }
             for agent in companion_agents:
                 agent.session_id = session_id
             return {
                 "session_id": session_id,
                 "mode": "local",
+                "capsules_loaded": {k: len(v) for k, v in capsule_map.items()},
                 "warning": "EvoMap Session 不可用，已创建本地 Session",
             }
 
-        # EvoMap 模式：DM 创建 Session，邀请所有陪玩 Agent
+        # EvoMap 模式
         participants = [a.node_id for a in companion_agents if a.registered]
         result = dm.client.create_session(
             topic=f"[剧本杀] {script_name} - {topic}",
@@ -327,10 +436,16 @@ class AgentOrchestrator:
                 "companions": participants,
                 "assistant": [a.node_id for a in assistant_agents if a.registered],
                 "mode": "evomap",
+                "capsule_count": {k: len(v) for k, v in capsule_map.items()},
             }
             for agent in companion_agents:
                 if agent.registered:
                     agent.session_id = session_id
+
+        # 胶囊上下文挂载到返回结果
+        if isinstance(result, dict):
+            result["capsules_loaded"] = {k: len(v) for k, v in capsule_map.items()}
+            result["capsule_contexts"] = capsule_contexts
         return result
 
     def broadcast_message(self, session_id: str, msg_type: str,
@@ -402,6 +517,28 @@ class AgentOrchestrator:
                 results.append({"agent": key, "reflection": result})
 
         return results
+
+    def load_all_agent_capsules(self, min_score: float = 0.3,
+                                limit: int = 5) -> dict[str, dict]:
+        """加载所有已注册 Agent 的历史胶囊。
+
+        可在游戏开局时调用，获取每个 Agent 的历史经验摘要。
+
+        Returns:
+            {"agent_key": {"capsules": [...], "context_prompt": str, "count": int}, ...}
+        """
+        result = {}
+        for key, agent in self.agents.items():
+            if not agent.node_id:
+                continue
+            capsules = agent.load_local_capsules(limit=limit, min_score=min_score)
+            context_prompt = agent.get_capsule_context_prompt(capsules) if capsules else ""
+            result[key] = {
+                "capsules": capsules,
+                "context_prompt": context_prompt,
+                "count": len(capsules),
+            }
+        return result
 
     def _find_agent_by_role(self, role: AgentRole) -> Optional[AgentNode]:
         """找到指定角色的第一个 Agent。"""

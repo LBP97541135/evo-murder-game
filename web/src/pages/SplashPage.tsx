@@ -75,6 +75,35 @@ export function SplashPage() {
         </div>
       )}
 
+      {/* 跳过动画：顶部居中白色文字，点击直接进入 */}
+      <div
+        style={{
+          position: "absolute",
+          top: 24,
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 10,
+        }}
+      >
+        <span
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate("/library");
+          }}
+          style={{
+            color: "#fff",
+            fontSize: 14,
+            cursor: "pointer",
+            opacity: 0.7,
+            letterSpacing: 1,
+            userSelect: "none",
+            fontFamily: '"Crimson Pro", Georgia, serif',
+          }}
+        >
+          点此处跳过动画
+        </span>
+      </div>
+
       {/* 触碰以入局字体：水平居中、垂直居中偏上，第14秒开始滑入 */}
       {ctaVisible && (
         <div

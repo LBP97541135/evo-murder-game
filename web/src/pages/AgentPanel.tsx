@@ -37,6 +37,20 @@ import {
 import { StudioShell } from "./StudioShell";
 
 // ============================
+// 角色立绘
+// ============================
+
+const agentPortraits: Record<string, string> = {
+  "white-crow": new URL("../video_picture/白鸽.png", import.meta.url).href,
+  echo: new URL("../video_picture/回声.png", import.meta.url).href,
+  "paper-owl": new URL("../video_picture/纸鸮.png", import.meta.url).href,
+  "night-cicada": new URL("../video_picture/夜蝉.png", import.meta.url).href,
+  "mist-harbor": new URL("../video_picture/雾港主理人.png", import.meta.url).href,
+  "iron-judge": new URL("../video_picture/铁幕裁判.png", import.meta.url).href,
+  "candle-core": new URL("../video_picture/暮烛引导员.png", import.meta.url).href,
+};
+
+// ============================
 // 类型定义
 // ============================
 
@@ -363,7 +377,7 @@ function AgentIDCard({
           <img
             src={agent.avatar}
             alt={agent.name}
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "center bottom" }}
           />
         ) : (
           <Stack align="center" justify="center" h="100%" gap="xs">
@@ -456,6 +470,7 @@ function AgentCarousel({
   onCardClick: (agent: CompanionAgent | DMAgent) => void;
 }) {
   const featured = agents[activeSlide];
+  const portraitUrl = agentPortraits[featured.key] || "";
 
   if (!featured) return null;
 
@@ -464,6 +479,16 @@ function AgentCarousel({
       radius="xl"
       className="agent-carousel"
       onClick={() => onCardClick(featured)}
+      style={
+        portraitUrl
+          ? {
+              backgroundImage: `linear-gradient(90deg, rgba(12,8,8,0.96) 0%, rgba(12,8,8,0.88) 42%, rgba(12,8,8,0.2) 100%), url(${portraitUrl})`,
+              backgroundPosition: "center, right center",
+              backgroundSize: "cover, auto 100%",
+              backgroundRepeat: "no-repeat, no-repeat",
+            }
+          : undefined
+      }
     >
       <Stack justify="space-between" h="100%" className="agent-carousel__content">
         <Group justify="space-between" align="flex-start">

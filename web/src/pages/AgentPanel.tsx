@@ -1395,12 +1395,20 @@ function AgentPanel() {
         <Paper radius="xl" className="industrial-card" p="lg">
           <Stack gap="md">
             <Group justify="space-between" align="flex-start">
-              <Stack gap={4}>
-                <Text className="monospace-label" size="xs" c="orange.3">
-                  {isCompanion ? "companion detail" : "dm detail"}
-                </Text>
-                <Title order={2}>{detailAgent.name}</Title>
-                <Text c="dimmed">{detailAgent.vibe}</Text>
+              <Group gap="md" align="flex-start" wrap="nowrap">
+                {agentPortraits[detailAgent.key] ? (
+                  <img
+                    src={agentPortraits[detailAgent.key]}
+                    alt={detailAgent.name}
+                    style={{ width: 80, height: 80, borderRadius: 8, objectFit: "cover", objectPosition: "top", flexShrink: 0 }}
+                  />
+                ) : null}
+                <Stack gap={4}>
+                  <Text className="monospace-label" size="xs" c="orange.3">
+                    {isCompanion ? "companion detail" : "dm detail"}
+                  </Text>
+                  <Title order={2}>{detailAgent.name}</Title>
+                  <Text c="dimmed">{detailAgent.vibe}</Text>
                 <Group gap="xs">
                   <Badge variant={detailAgent.registered ? "filled" : "light"} color={detailAgent.registered ? "teal" : "gray"}>
                     {detailAgent.registered ? "已注册后端节点" : "未注册后端节点"}
@@ -1417,6 +1425,7 @@ function AgentPanel() {
                   ) : null}
                 </Group>
               </Stack>
+              </Group>
               <Badge variant="light" color="red">
                 {detailAgent.highlight}
               </Badge>

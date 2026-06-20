@@ -846,6 +846,172 @@ class GameEngine:
             "intents": state.intents or {},
         }
 
+    # ============================
+    # 私聊系统
+    # ============================
+
+    def send_private_message(
+        self, game_id: str, from_key: str, to_key: str, content: str
+    ) -> dict:
+        """发送私聊消息。
+
+        Args:
+            from_key: 发送者 agent_key 或 "player"
+            to_key: 接收者 agent_key
+            content: 消息内容
+        Returns:
+            {"success": bool, "thread_id": str, "message": dict}
+        """
+        game = self.get_game(game_id)
+        if not game:
+            return {"error": "game_not_found"}
+
+        # 确保接收者存在
+        to_state = game.get("agents", {}).get(to_key)
+        if not to_state:
+            return {"error": "recipient_not_found"}
+
+        # 生成线程 ID（两人之间的私聊共享一个 thread）
+        participants = sorted([from_key, to_key])
+        thread_id = f"pm_{participants[0]}_{participants[1]}"
+
+        # 初始化私聊存储
+        if "private_threads" not in game:
+            game["private_threads"] = {}
+
+        if thread_id not in game["private_threads"]:
+            game["private_threads"][thread_id] = {
+                "thread_id": thread_id,
+                "participants": [from_key, to_key],
+                "messages": [],
+            }
+
+        msg = {
+            "from": from_key,
+            "to": to_key,
+            "content": content,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        game["private_threads"][thread_id]["messages"].append(msg)
+
+        # 写入接收者的 chat_history
+        to_state.chat_history.append({
+            "role": from_key,
+            "content": f"[私聊] {content}",
+        })
+
+        self._sync_to_db(game)
+
+        return {
+            "success": True,
+            "thread_id": thread_id,
+            "message": msg,
+        }
+
+    def get_private_threads(self, game_id: str, agent_key: str) -> dict:
+        """获取某个角色参与的所有私聊线程。
+
+        Args:
+            agent_key: 查询的角色 key，或 "player"
+        Returns:
+            {"success": bool, "threads": list}
+        """
+        game = self.get_game(game_id)
+        if not game:
+            return {"error": "game_not_found"}
+
+        threads = game.get("private_threads", {})
+        my_threads = []
+        for tid, thread in threads.items():
+            if agent_key in thread.get("participants", []):
+                my_threads.append(thread)
+
+        return {
+            "success": True,
+            "threads": my_threads,
+        }
+
+    def get_private_thread(self, game_id: str, thread_id: str) -> dict:
+        """获取指定私聊线程的消息历史。"""
+        game = self.get_game(game_id)
+        if not game:
+            return {"error": "game_not_found"}
+
+        thread = game.get("private_threads", {}).get(thread_id)
+        if not thread:
+            return {"error": "thread_not_found"}
+
+        return {
+            "success": True,
+            "thread": thread,
+        }
+
+    # ============================
+    # 强制回答
+    # ============================
+
+    def force_answer(
+        self, game_id: str, asker_key: str, target_key: str, question: str
+    ) -> dict:
+        """强制指定 Agent 回答问题——插入发言队列最前面，其他角色不可插队。
+
+        Args:
+            asker_key: 提问者（通常是 "player"）
+            target_key: 被指定的 Agent key
+            question: 问题内容
+        Returns:
+            {"success": bool, "target_key": str, "question": str}
+        """
+        game = self.get_game(game_id)
+        if not game:
+            return {"error": "game_not_found"}
+
+        # 确认目标 Agent 存在
+        target_state = game.get("agents", {}).get(target_key)
+        if not target_state:
+            return {"error": "target_agent_not_found"}
+
+        # 写入目标 Agent 的 chat_history
+        target_state.chat_history.append({
+            "role": asker_key,
+            "content": f"[强制回答] {question}",
+        })
+
+        # 如果有发言轮次，将目标插入队列最前面
+        speak_round = game.get("speak_round")
+        if speak_round:
+            speak_round.interject(target_key, reason=f"被{asker_key}强制指定回答")
+
+        # 记录强制回答状态
+        if "force_answer_state" not in game:
+            game["force_answer_state"] = None
+        game["force_answer_state"] = {
+            "asker": asker_key,
+            "target": target_key,
+            "question": question,
+            "active": True,
+        }
+
+        self._sync_to_db(game)
+
+        return {
+            "success": True,
+            "target_key": target_key,
+            "target_name": target_state.character.get("name", target_key),
+            "question": question,
+        }
+
+    def clear_force_answer(self, game_id: str) -> dict:
+        """清除强制回答状态（回答完毕后调用）。"""
+        game = self.get_game(game_id)
+        if not game:
+            return {"error": "game_not_found"}
+
+        game["force_answer_state"] = None
+        self._sync_to_db(game)
+
+        return {"success": True}
+
     def add_chat_to_agent(self, game_id: str, agent_key: str, role: str, content: str) -> None:
         """向指定 Agent 的 chat_history 追加一条消息。"""
         game = self._games.get(game_id)

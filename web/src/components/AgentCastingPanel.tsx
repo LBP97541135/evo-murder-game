@@ -248,7 +248,8 @@ export function AgentCastingPanel({
         <Group justify="space-between" mb="md">
           <Box>
             <Text className="monospace-label" size="xs" c="dimmed">ensemble templates</Text>
-            <Title order={3}>推荐搭配</Title>
+            <Title order={3}>推荐搭配</Title>  
+            <Text size="xs" c="red.2" mt="sm">点击卡片一键填充圆桌</Text>
           </Box>
          
         </Group>
@@ -269,7 +270,7 @@ export function AgentCastingPanel({
                 </Badge>
               </Group>
               <Text size="sm" c="dimmed" lh={1.6}>{template.description}</Text>
-              <Text size="xs" c="red.2" mt="sm">点击卡片一键填充圆桌</Text>
+             
               <Group gap={4} mt="md">
                 {template.agentKeys.map((key) => {
                   const agent = CASTING_AGENTS.find((item) => item.key === key);

@@ -48,6 +48,17 @@ import {
   SCRIPT_CHAPTERS,
   SEARCH_EVIDENCE,
 } from "./gameMockData";
+import { backendEvidenceToGameEvidence } from "../api/adapters";
+import {
+  createEvidence,
+  createGameSession,
+  forceGamePhase,
+  getGamePhase,
+  getEvidences,
+  presentEvidence,
+  saveConversation,
+  submitGameVote,
+} from "../api/invoke";
 import { AgentCastingPanel } from "../components/AgentCastingPanel";
 import { StudioShell } from "./StudioShell";
 
@@ -75,20 +86,46 @@ const scriptMap: Record<string, string> = {
 };
 
 type PublicEvent =
-  | { id: number; type: "speech"; speaker: string; text: string; tone: string }
+  | { id: number; type: "speech"; speaker: string; text: string; tone: string; suspectId?: string; evidenceId?: string }
   | { id: number; type: "system"; title: string; text: string }
-  | { id: number; type: "evidence"; speaker: string; evidence: Evidence; reason?: string }
+  | { id: number; type: "evidence"; speaker: string; evidence: Evidence; reason?: string; suspectId?: string }
   | { id: number; type: "forced"; asker: string; agent: string; question: string }
-  | { id: number; type: "private"; agent: string; text: string };
+  | { id: number; type: "private"; agent: string; text: string }
+  | { id: number; type: "accusation"; actor: string; target: string; sourceTitle: string; reason?: string }
+  | { id: number; type: "inquiry"; asker: string; target: string; sourceTitle: string; question: string; answer: string };
 
 type PublicEventInput =
-  | { type: "speech"; speaker: string; text: string; tone: string }
+  | { type: "speech"; speaker: string; text: string; tone: string; suspectId?: string; evidenceId?: string }
   | { type: "system"; title: string; text: string }
-  | { type: "evidence"; speaker: string; evidence: Evidence; reason?: string }
+  | { type: "evidence"; speaker: string; evidence: Evidence; reason?: string; suspectId?: string }
   | { type: "forced"; asker: string; agent: string; question: string }
-  | { type: "private"; agent: string; text: string };
+  | { type: "private"; agent: string; text: string }
+  | { type: "accusation"; actor: string; target: string; sourceTitle: string; reason?: string }
+  | { type: "inquiry"; asker: string; target: string; sourceTitle: string; question: string; answer: string };
 
-type DialogType = "private" | "force" | "evidence" | "rules" | "script" | null;
+type DialogType =
+  | "private"
+  | "force"
+  | "evidence"
+  | "evidence-detail"
+  | "discussion-detail"
+  | "point"
+  | "inquiry"
+  | "rules"
+  | "script"
+  | null;
+
+type InquiryRecord = {
+  id: number;
+  sourceEventId: number;
+  sourceType: "证据" | "关键发言";
+  sourceTitle: string;
+  evidence?: Evidence;
+  targetId: string;
+  targetName: string;
+  question: string;
+  answer: string;
+};
 
 type ScriptHighlight = {
   id: string;
@@ -98,8 +135,24 @@ type ScriptHighlight = {
 
 const initialEvents: PublicEvent[] = [
   { id: 1, type: "system", title: "阶段开始", text: "公共讨论已开启，所有发言按照队列顺序进行。" },
-  { id: 2, type: "speech", speaker: "陈墨", text: "我想先确认值班表究竟是什么时候被替换的。", tone: "teal" },
-  { id: 3, type: "speech", speaker: "白鸦 Agent", text: "访客卡背面的锈迹更像是储物柜编号，而不是门牌号。", tone: "blue" },
+  {
+    id: 2,
+    type: "speech",
+    speaker: "陈墨",
+    text: "我保管的事故档案里，值班表在十二年前归档时就已经缺失了一页。最近出现的这张表不是原件，我想先确认它究竟是什么时候被替换的，以及谁有机会接触旧档案室。",
+    tone: "teal",
+    suspectId: "echo",
+  },
+  {
+    id: 3,
+    type: "speech",
+    speaker: "白鸦 Agent",
+    text: "访客卡背面的锈迹呈现规则的长方形边框，更像地下储物柜的编号牌，而不是宿舍门牌。卡片断口还有新鲜摩擦痕迹，说明它最近曾被人从狭窄金属缝隙中取出。",
+    tone: "blue",
+    suspectId: "echo",
+    evidenceId: "visitor-card",
+  },
+  { id: 4, type: "evidence", speaker: "白鸦 Agent", evidence: INITIAL_EVIDENCE[0], reason: "访客卡背面的锈迹可能对应地下储物柜。" },
 ];
 
 function formatTime(totalSeconds: number) {
@@ -114,6 +167,9 @@ function GamePage() {
   const { ref: fullscreenRef, toggle: toggleFullscreen, fullscreen } = useFullscreen();
 
   const [phaseIndex, setPhaseIndex] = React.useState(0);
+  const [sessionId, setSessionId] = React.useState(
+    () => window.localStorage.getItem(`game-session:${id}`) || "",
+  );
   const phase = GAME_PHASES[phaseIndex];
   const [selectedRole, setSelectedRole] = React.useState("");
   const [roleConfirmed, setRoleConfirmed] = React.useState(false);
@@ -132,7 +188,7 @@ function GamePage() {
   const [selectedScriptChapter, setSelectedScriptChapter] = React.useState(0);
   const [introduced, setIntroduced] = React.useState<string[]>([]);
   const [searchesLeft, setSearchesLeft] = React.useState(2);
-  const [evidence, setEvidence] = React.useState<Evidence[]>(INITIAL_EVIDENCE);
+  const [evidence, setEvidence] = React.useState<Evidence[]>([]);
   const [newEvidence, setNewEvidence] = React.useState<Evidence | null>(null);
   const [queue, setQueue] = React.useState<string[]>(["chen", "crow"]);
   const [currentSpeaker, setCurrentSpeaker] = React.useState<string | null>("chen");
@@ -143,8 +199,9 @@ function GamePage() {
   const [selectedPlayerId, setSelectedPlayerId] = React.useState<string | null>(null);
   const [targetId, setTargetId] = React.useState("crow");
   const [question, setQuestion] = React.useState("");
-  const [selectedEvidenceId, setSelectedEvidenceId] = React.useState(INITIAL_EVIDENCE[0].id);
+  const [selectedEvidenceId, setSelectedEvidenceId] = React.useState("");
   const [evidenceVisibility, setEvidenceVisibility] = React.useState("所有人");
+  const [evidenceReason, setEvidenceReason] = React.useState("");
   const [privateThreads, setPrivateThreads] = React.useState(PRIVATE_THREADS);
   const [activeThreadId, setActiveThreadId] = React.useState(PRIVATE_THREADS[0].id);
   const [privateMessage, setPrivateMessage] = React.useState("");
@@ -157,6 +214,15 @@ function GamePage() {
   const [voteEvidence, setVoteEvidence] = React.useState<string[]>([]);
   const [voteSubmitted, setVoteSubmitted] = React.useState(false);
   const [introSpotlight, setIntroSpotlight] = React.useState<(typeof GAME_PLAYERS)[number] | null>(null);
+  const [selectedDiscussionEventId, setSelectedDiscussionEventId] = React.useState<number | null>(null);
+  const [selectedDetailEvidence, setSelectedDetailEvidence] = React.useState<Evidence | null>(null);
+  const [pointTargetId, setPointTargetId] = React.useState("chen");
+  const [pointReason, setPointReason] = React.useState("");
+  const [inquiryTargetId, setInquiryTargetId] = React.useState("crow");
+  const [inquiryQuestion, setInquiryQuestion] = React.useState("");
+  const [inquiryRecords, setInquiryRecords] = React.useState<InquiryRecord[]>([]);
+  const [privateInviteStatus, setPrivateInviteStatus] = React.useState<"未处理" | "稍后处理" | "已接受" | "已拒绝">("未处理");
+  const [chatHistoryOpen, setChatHistoryOpen] = React.useState(false);
 
   React.useEffect(() => {
     const timer = window.setInterval(() => {
@@ -164,6 +230,19 @@ function GamePage() {
     }, 1000);
     return () => window.clearInterval(timer);
   }, [currentSpeaker]);
+
+  React.useEffect(() => {
+    if (!sessionId) return;
+    getEvidences(id, sessionId)
+      .then((result) => {
+        const records = result.evidences.map(backendEvidenceToGameEvidence);
+        setEvidence(records);
+        setSelectedEvidenceId((current) => current || records[0]?.id || "");
+      })
+      .catch((error) => {
+        showFeedback(`后端证物加载失败：${error instanceof Error ? error.message : String(error)}`);
+      });
+  }, [id, sessionId]);
 
   const playerById = (playerId: string | null) => GAME_PLAYERS.find((item) => item.id === playerId);
   const current = playerById(currentSpeaker);
@@ -189,7 +268,33 @@ function GamePage() {
 
   const showFeedback = (text: string) => setFeedback(text);
 
-  const goToPhase = (index: number) => {
+  const confirmRoleSelection = async () => {
+    if (!selectedRole) return;
+    try {
+      let activeSessionId = sessionId;
+      if (activeSessionId) {
+        await getGamePhase(activeSessionId);
+      } else {
+        const session = await createGameSession(id, `剧本游戏：${scriptTitle}`);
+        activeSessionId = session.sessionId;
+        setSessionId(activeSessionId);
+        window.localStorage.setItem(`game-session:${id}`, activeSessionId);
+      }
+      setRoleConfirmed(true);
+      setPhaseIndex(1);
+      showFeedback(`角色已确认，后端游戏会话 ${activeSessionId} 可用。`);
+    } catch (error) {
+      showFeedback(`无法确认角色：后端游戏会话创建或恢复失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const backendPhaseForIndex = (index: number) => {
+    if (index <= 2) return "intro";
+    if (index <= 4) return "investigation";
+    return "voting";
+  };
+
+  const goToPhase = async (index: number) => {
     if (phase.id === "role-selection" && index > 0 && !roleConfirmed) {
       showFeedback("请先确认角色，选角完成后才能进入后续阶段。");
       return;
@@ -202,12 +307,21 @@ function GamePage() {
       showFeedback("请先完成当前阶段，不能跳过尚未完成的流程。");
       return;
     }
+    if (!sessionId) {
+      showFeedback("无法切换阶段：尚未创建后端游戏会话。");
+      return;
+    }
+    try {
+      await forceGamePhase(sessionId, backendPhaseForIndex(index));
+    } catch (error) {
+      showFeedback(`后端阶段切换失败：${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
     setPhaseIndex(index);
     setSpeakerSeconds(90);
     if (GAME_PHASES[index].id === "discussion") {
       setCurrentSpeaker("chen");
       setQueue(["chen", "crow"]);
-      addEvent({ type: "system", title: "阶段切换", text: "进入线索交流阶段，发言、私聊和证物操作已全部开放。" });
     }
   };
 
@@ -261,14 +375,31 @@ function GamePage() {
     showFeedback(`${introPlayer.name} 已完成自我介绍。`);
   };
 
-  const randomSearch = () => {
+  const randomSearch = async () => {
     if (searchesLeft <= 0) return;
+    if (!sessionId) return showFeedback("搜证失败：尚未创建后端游戏会话。");
     const available = SEARCH_EVIDENCE.filter((item) => !evidence.some((owned) => owned.id === item.id));
     const found = available[Math.floor(Math.random() * available.length)] || SEARCH_EVIDENCE[0];
-    setEvidence((items) => [...items, found]);
-    setNewEvidence(found);
-    setSearchesLeft((value) => value - 1);
-    showFeedback(`搜证成功：获得“${found.name}”，已存入我的证物。`);
+    try {
+      const result = await createEvidence({
+        scriptId: id,
+        sessionId,
+        name: found.name,
+        basicDescription: found.description,
+        category: found.icon || "physical",
+        importance: "medium",
+        relatedActors: [],
+        discoveredBy: "player",
+      });
+      const saved = result.evidence ? backendEvidenceToGameEvidence(result.evidence) : found;
+      setEvidence((items) => [...items, saved]);
+      setSelectedEvidenceId((currentId) => currentId || saved.id);
+      setNewEvidence(saved);
+      setSearchesLeft((value) => value - 1);
+      showFeedback(`搜证成功：后端已保存“${saved.name}”。`);
+    } catch (error) {
+      showFeedback(`后端搜证失败：${error instanceof Error ? error.message : String(error)}`);
+    }
   };
 
   const confirmForcedAnswer = () => {
@@ -283,14 +414,34 @@ function GamePage() {
     showFeedback(`${agent.name} 已被指定为下一位发言者，其他角色不可插队。`);
   };
 
-  const showEvidence = () => {
+  const showEvidence = async () => {
     if (!isUserSpeaking) return showFeedback("只有在自己发言时才能出示证物。");
+    if (!sessionId) return showFeedback("出示证物失败：尚未创建后端游戏会话。");
     const item = evidence.find((entry) => entry.id === selectedEvidenceId);
     if (!item) return;
+    const reason = evidenceReason.trim();
+    try {
+      await presentEvidence(
+        item.id,
+        evidenceVisibility === "指定角色" ? targetId : "all",
+        "player",
+        reason,
+        evidenceVisibility,
+      );
+    } catch (error) {
+      showFeedback(`后端出示证物失败：${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
     setEvidence((items) => items.map((entry) => entry.id === item.id ? { ...entry, visibility: evidenceVisibility as Evidence["visibility"] } : entry));
-    addEvent({ type: "evidence", speaker: "林晓青", evidence: { ...item, visibility: evidenceVisibility as Evidence["visibility"] } });
+    addEvent({
+      type: "evidence",
+      speaker: "林晓青",
+      evidence: { ...item, visibility: evidenceVisibility as Evidence["visibility"] },
+      reason: evidenceReason.trim() || undefined,
+    });
     setDialog(null);
-    showFeedback(`已出示“${item.name}”，公开范围：${evidenceVisibility}。`);
+    setEvidenceReason("");
+    showFeedback(`后端已记录出示“${item.name}”，公开范围：${evidenceVisibility}。`);
   };
 
   const acceptPrivateInvite = (playerId = targetId) => {
@@ -311,32 +462,62 @@ function GamePage() {
     } else {
       setActiveThreadId(existing.id);
     }
-    setRightTab("private");
+    setRightTab("chat");
     setDialog(null);
     showFeedback(`已与 ${player.name} 建立私聊，公共发言队列未受影响。`);
   };
 
-  const sendPublicMessage = () => {
+  const sendPublicMessage = async () => {
     if (!publicMessage.trim()) return;
     if (!isUserSpeaking) return showFeedback("当前没有公共发言权，请先进入发言队列。");
-    addEvent({ type: "speech", speaker: "林晓青", text: publicMessage.trim(), tone: "orange" });
-    setPublicMessage("");
+    if (!sessionId) return showFeedback("发送失败：尚未创建后端游戏会话。");
+    const content = publicMessage.trim();
+    try {
+      await saveConversation({
+        sessionId,
+        actorName: "player",
+        chatMessages: [{ role: "user", content }],
+        finalResponse: content,
+      });
+      addEvent({ type: "speech", speaker: "林晓青", text: content, tone: "orange" });
+      setPublicMessage("");
+    } catch (error) {
+      showFeedback(`后端保存公开发言失败：${error instanceof Error ? error.message : String(error)}`);
+    }
   };
 
-  const sendPrivateMessage = () => {
+  const sendPrivateMessage = async () => {
     if (!privateMessage.trim() || !activeThread) return;
-    setPrivateThreads((threads) => threads.map((thread) =>
-      thread.id === activeThread.id ? { ...thread, messages: [...thread.messages, `我：${privateMessage.trim()}`] } : thread,
-    ));
-    setPrivateMessage("");
+    if (!sessionId) return showFeedback("发送失败：尚未创建后端游戏会话。");
+    const content = privateMessage.trim();
+    try {
+      await saveConversation({
+        sessionId,
+        actorName: activeThread.playerId,
+        chatMessages: [{ role: "user", content }],
+      });
+      setPrivateThreads((threads) => threads.map((thread) =>
+        thread.id === activeThread.id ? { ...thread, messages: [...thread.messages, `我：${content}`] } : thread,
+      ));
+      setPrivateMessage("");
+    } catch (error) {
+      showFeedback(`后端保存私聊失败：${error instanceof Error ? error.message : String(error)}`);
+    }
   };
 
-  const submitVote = () => {
+  const submitVote = async () => {
     if (!voteSuspect || !voteReason.trim() || voteEvidence.length === 0) {
       return showFeedback("请选择嫌疑人、填写推理理由并勾选至少一件关键证物。");
     }
-    setVoteSubmitted(true);
-    showFeedback("推理投票已提交。Agent 将独立提交推理，但不会替你修改选择。");
+    if (!sessionId) return showFeedback("投票失败：尚未创建后端游戏会话。");
+    try {
+      await forceGamePhase(sessionId, "voting");
+      const result = await submitGameVote(sessionId, voteSuspect, voteReason);
+      setVoteSubmitted(true);
+      showFeedback(result.message || "推理投票已写入后端。");
+    } catch (error) {
+      showFeedback(`后端投票失败：${error instanceof Error ? error.message : String(error)}`);
+    }
   };
 
   const playerStatus = (playerId: string) => {
@@ -379,6 +560,113 @@ function GamePage() {
     showFeedback("高亮文段已删除。");
   };
 
+  const discussionSource = (eventId: number | null) => {
+    const event = events.find((item) => item.id === eventId);
+    if (!event || (event.type !== "speech" && event.type !== "evidence")) return null;
+    return event;
+  };
+
+  const discussionSourceTitle = (event: Extract<PublicEvent, { type: "speech" | "evidence" }>) =>
+    event.type === "evidence" ? event.evidence.name : `${event.speaker} 的发言`;
+
+  const openEvidenceDetail = (item: Evidence) => {
+    setSelectedDetailEvidence(item);
+    setDialog("evidence-detail");
+  };
+
+  const openPointDialog = (eventId: number) => {
+    setSelectedDiscussionEventId(eventId);
+    setPointTargetId("chen");
+    setPointReason("");
+    setDialog("point");
+  };
+
+  const openDiscussionDetail = (eventId: number) => {
+    setSelectedDiscussionEventId(eventId);
+    setDialog("discussion-detail");
+  };
+
+  const confirmPoint = () => {
+    const source = discussionSource(selectedDiscussionEventId);
+    const target = playerById(pointTargetId);
+    if (!source || !target) return;
+    setEvents((items) => items.map((item) =>
+      item.id === source.id && (item.type === "speech" || item.type === "evidence")
+        ? { ...item, suspectId: target.id }
+        : item,
+    ));
+    addEvent({
+      type: "accusation",
+      actor: "林晓青",
+      target: `${target.role} · ${target.name}`,
+      sourceTitle: discussionSourceTitle(source),
+      reason: pointReason.trim() || undefined,
+    });
+    setDialog(null);
+    showFeedback(`已将“${discussionSourceTitle(source)}”指向 ${target.role}。`);
+  };
+
+  const openInquiryDialog = (eventId: number) => {
+    setSelectedDiscussionEventId(eventId);
+    setInquiryTargetId("crow");
+    setInquiryQuestion("");
+    setDialog("inquiry");
+  };
+
+  const confirmInquiry = () => {
+    const source = discussionSource(selectedDiscussionEventId);
+    const target = playerById(inquiryTargetId);
+    if (!source || !target || !inquiryQuestion.trim()) {
+      showFeedback("请选择质询对象并填写问题。");
+      return;
+    }
+    const sourceTitle = discussionSourceTitle(source);
+    const answer = source.type === "evidence"
+      ? `我检查过“${source.evidence.name}”的来源。它能证明时间和地点存在关联，但还不能单独证明持有人身份。`
+      : `关于这段发言，我的判断是其中有一处时间顺序需要复核。我愿意把相关行动记录公开出来接受比对。`;
+    const record: InquiryRecord = {
+      id: Date.now(),
+      sourceEventId: source.id,
+      sourceType: source.type === "evidence" ? "证据" : "关键发言",
+      sourceTitle,
+      evidence: source.type === "evidence" ? source.evidence : undefined,
+      targetId: target.id,
+      targetName: `${target.role} · ${target.name}`,
+      question: inquiryQuestion.trim(),
+      answer,
+    };
+    setInquiryRecords((items) => [...items, record]);
+    addEvent({
+      type: "inquiry",
+      asker: "林晓青",
+      target: record.targetName,
+      sourceTitle,
+      question: record.question,
+      answer,
+    });
+    setRightTab("chat");
+    setDialog(null);
+    setInquiryQuestion("");
+    showFeedback(`已完成对 ${target.role} 的质询，记录已保存到证物栏。`);
+  };
+
+  const selectedDiscussionSource = discussionSource(selectedDiscussionEventId);
+  const selectedDiscussionSpeaker = selectedDiscussionSource
+    ? GAME_PLAYERS.find((player) =>
+      selectedDiscussionSource.type === "speech"
+        ? selectedDiscussionSource.speaker.includes(player.name)
+        : selectedDiscussionSource.speaker.includes(player.name),
+    )
+    : undefined;
+  const selectedDiscussionSuspect = selectedDiscussionSource?.suspectId
+    ? playerById(selectedDiscussionSource.suspectId)
+    : undefined;
+  const selectedDiscussionEvidence = selectedDiscussionSource?.type === "evidence"
+    ? selectedDiscussionSource.evidence
+    : selectedDiscussionSource?.type === "speech" && selectedDiscussionSource.evidenceId
+      ? evidence.find((item) => item.id === selectedDiscussionSource.evidenceId)
+      : undefined;
+
   const renderHighlightedScript = (content: string, chapterIndex: number) => {
     const highlights = scriptHighlights
       .filter((item) => item.chapter === chapterIndex && content.includes(item.text))
@@ -405,8 +693,15 @@ function GamePage() {
   const renderEvent = (event: PublicEvent) => {
     if (event.type === "speech") {
       return (
-        <Paper key={event.id} radius="lg" p="sm" className="game-chat-row">
+        <Paper
+          key={event.id}
+          radius="lg"
+          p="sm"
+          className="game-chat-row game-discussion-entry"
+          onClick={() => phase.id === "discussion" && openDiscussionDetail(event.id)}
+        >
           <Group align="flex-start" wrap="nowrap">
+<<<<<<< HEAD
             {(() => {
               const speakerPlayer = GAME_PLAYERS.find((p) => p.name === event.speaker || `${p.name} Agent` === event.speaker);
               const speakerPortrait = speakerPlayer ? characterPortraits[speakerPlayer.role] : undefined;
@@ -417,17 +712,47 @@ function GamePage() {
               );
             })()}
             <Box><Text size="sm" fw={800} c={`${event.tone}.3`}>{event.speaker}</Text><Text size="sm" c="gray.3">{event.text}</Text></Box>
+=======
+            <Avatar size="sm" color={event.tone}>{event.speaker.slice(0, 1)}</Avatar>
+            <Box style={{ flex: 1 }}>
+              <Text size="sm" fw={800} c={`${event.tone}.3`}>{event.speaker}</Text>
+              <Text size="sm" c="gray.3" lh={1.65}>{event.text}</Text>
+              {phase.id === "discussion" && <Text size="xs" c="dimmed" mt={6}>点击查看发言详情</Text>}
+            </Box>
+>>>>>>> 45115ae951f37312eb6d6648439e220503b86691
           </Group>
         </Paper>
       );
     }
     if (event.type === "evidence") {
       return (
-        <Paper key={event.id} radius="xl" p="md" className="game-evidence-event">
+        <Paper
+          key={event.id}
+          radius="xl"
+          p="md"
+          className="game-evidence-event game-discussion-entry"
+          onClick={() => phase.id === "discussion" && openDiscussionDetail(event.id)}
+        >
           <Text className="monospace-label" size="xs" c="orange.3">evidence presented</Text>
-          <Group justify="space-between" mt={5}><Text fw={900}>{event.evidence.name}</Text><Badge>{event.evidence.visibility}</Badge></Group>
+          <Group justify="space-between" mt={5}>
+            <Button
+              variant="transparent"
+              color="orange"
+              p={0}
+              onClick={(clickEvent) => {
+                clickEvent.stopPropagation();
+                openEvidenceDetail(event.evidence);
+              }}
+              className="game-evidence-link"
+            >
+              {event.evidence.name}
+            </Button>
+            <Badge>{event.evidence.visibility}</Badge>
+          </Group>
           <Text size="sm" c="dimmed" mt={6}>{event.evidence.description}</Text>
+          {event.reason && <Text size="sm" mt={6}>出示理由：{event.reason}</Text>}
           <Group gap="lg" mt="sm"><Text size="xs">出示者：{event.speaker}</Text><Text size="xs">地点：{event.evidence.location}</Text><Text size="xs">时间：{event.evidence.time}</Text></Group>
+          {phase.id === "discussion" && <Text size="xs" c="dimmed" mt="sm">点击查看证据与发言详情</Text>}
         </Paper>
       );
     }
@@ -437,6 +762,25 @@ function GamePage() {
           <Text fw={900}>指定回答：{event.asker} → {event.agent}</Text>
           <Text size="sm" mt={5}>“{event.question}”</Text>
           <Text size="xs" c="red.3" mt={6}>被指定 Agent 必须成为下一位发言者，其他角色不可插队。</Text>
+        </Paper>
+      );
+    }
+    if (event.type === "accusation") {
+      return (
+        <Paper key={event.id} radius="lg" p="sm" className="game-accusation-event">
+          <Text fw={900}>{event.actor} 将“{event.sourceTitle}”指向 {event.target}</Text>
+          {event.reason && <Text size="sm" c="dimmed" mt={5}>理由：{event.reason}</Text>}
+        </Paper>
+      );
+    }
+    if (event.type === "inquiry") {
+      return (
+        <Paper key={event.id} radius="lg" p="md" className="game-inquiry-event">
+          <Text size="xs" c="blue.3" className="monospace-label">cross examination</Text>
+          <Text fw={900} mt={4}>{event.asker} → {event.target}</Text>
+          <Text size="sm" mt={6}>针对：{event.sourceTitle}</Text>
+          <Text size="sm" mt={6}>问：“{event.question}”</Text>
+          <Text size="sm" c="dimmed" mt={6}>答：“{event.answer}”</Text>
         </Paper>
       );
     }
@@ -461,11 +805,7 @@ function GamePage() {
           <Button
             radius="xl"
             disabled={!selectedRole}
-            onClick={() => {
-              setRoleConfirmed(true);
-              setPhaseIndex(1);
-              showFeedback("角色已确认并锁定，已进入阅读剧本阶段。");
-            }}
+            onClick={confirmRoleSelection}
           >
             {selectedRole ? "确认阵容并进入剧本" : "请先在圆桌中选择自己扮演的角色"}
           </Button>
@@ -594,8 +934,7 @@ function GamePage() {
         </Paper>
         <Paper className="game-scene-card" radius="xl"><Box className="game-scene-card__image" /><Stack className="game-scene-card__copy" gap="xs"><Badge color="red" variant="filled">DM 场景</Badge><Title order={3}>被雨水冲开的旧门</Title><Text c="gray.3">墙上的值班表缺失了一页，地面新鲜鞋印通向封死的 103 室。</Text></Stack></Paper>
         <Group justify="space-between"><Text fw={900}>公共讨论与事件</Text><Badge variant="light">自动记录</Badge></Group>
-        <Stack gap="xs">{events.map(renderEvent)}</Stack>
-        {phase.id === "discussion" && <Paper radius="xl" p="md" className="game-private-event"><Group justify="space-between"><Box><Text fw={900}>白鸦 Agent 申请私聊</Text><Text size="sm" c="dimmed">“我发现门禁记录存在一个不适合公开讨论的时间矛盾。”</Text></Box><Group><Button size="xs" onClick={() => { setTargetId("crow"); setDialog("private"); }}>允许</Button><Button size="xs" variant="light">稍后</Button><Button size="xs" variant="subtle" color="red">拒绝</Button></Group></Group></Paper>}
+        <Stack gap="xs">{events.filter((event) => event.type !== "accusation").map(renderEvent)}</Stack>
       </Stack>
     );
   };
@@ -603,7 +942,7 @@ function GamePage() {
   const renderRightPanel = () => (
     <Tabs value={rightTab} onChange={setRightTab} className="game-right-tabs">
       <Tabs.List grow>
-        <Tabs.Tab value="script">剧本</Tabs.Tab><Tabs.Tab value="tasks">任务</Tabs.Tab><Tabs.Tab value="evidence">证物</Tabs.Tab><Tabs.Tab value="private">私聊 <Badge size="xs">{privateThreads.reduce((sum, item) => sum + item.unread, 0)}</Badge></Tabs.Tab>
+        <Tabs.Tab value="script">剧本</Tabs.Tab><Tabs.Tab value="tasks">任务</Tabs.Tab><Tabs.Tab value="evidence">证物</Tabs.Tab><Tabs.Tab value="chat" className={privateInviteStatus === "未处理" || privateInviteStatus === "稍后处理" ? "game-chat-tab has-pending-invite" : "game-chat-tab"}>聊天 <Badge size="xs">{privateThreads.reduce((sum, item) => sum + item.unread, 0) + (privateInviteStatus === "未处理" || privateInviteStatus === "稍后处理" ? 1 : 0)}</Badge></Tabs.Tab>
       </Tabs.List>
       <ScrollArea className="game-right-tab-scroll" offsetScrollbars>
         <Tabs.Panel value="script" pt="md">
@@ -654,8 +993,145 @@ function GamePage() {
           </Stack>
         </Tabs.Panel>
         <Tabs.Panel value="tasks" pt="md"><Stack gap="sm">{[{ label: "主线任务", text: "找到原始门禁记录", done: evidence.some((item) => item.id === "duty-sheet") }, { label: "隐藏任务", text: "避免过早暴露数据删除交易", done: false }, { label: "阶段任务", text: phase.id === "search" ? "完成两次搜证" : "推进当前游戏阶段", done: phase.id === "search" && searchesLeft === 0 }].map((task) => <Paper key={task.label} p="sm" radius="lg" className="game-clue-item"><Group justify="space-between"><Text fw={800}>{task.label}</Text><Badge color={task.done ? "teal" : "gray"}>{task.done ? "已完成" : "进行中"}</Badge></Group><Text size="sm" c="dimmed" mt={5}>{task.text}</Text></Paper>)}</Stack></Tabs.Panel>
-        <Tabs.Panel value="evidence" pt="md"><Stack gap="sm">{evidence.map((item) => <Paper key={item.id} p="sm" radius="lg" className="game-clue-item"><Group justify="space-between"><Text fw={800}>{item.name}</Text><Badge size="xs">{item.visibility}</Badge></Group><Text size="sm" c="dimmed" mt={5}>{item.description}</Text><Text size="xs" mt="sm">获得方式：{item.source}</Text><Button size="xs" mt="sm" variant="light" disabled={!isUserSpeaking || phase.id !== "discussion"} onClick={() => { setSelectedEvidenceId(item.id); setDialog("evidence"); }}>出示证物</Button></Paper>)}</Stack></Tabs.Panel>
-        <Tabs.Panel value="private" pt="md"><Group gap="xs" mb="sm">{privateThreads.map((thread) => <Button key={thread.id} size="xs" variant={thread.id === activeThreadId ? "filled" : "light"} onClick={() => { setActiveThreadId(thread.id); setPrivateThreads((items) => items.map((item) => item.id === thread.id ? { ...item, unread: 0 } : item)); }}>{thread.name}{thread.unread > 0 && ` (${thread.unread})`}</Button>)}</Group>{activeThread ? <Stack gap="sm"><Text fw={900}>{activeThread.name}</Text><Stack gap="xs">{activeThread.messages.map((text, index) => <Paper key={index} p="sm" radius="lg" className="game-private-chat"><Text size="sm">{text}</Text></Paper>)}</Stack><TextInput value={privateMessage} onChange={(event) => setPrivateMessage(event.currentTarget.value)} placeholder="输入私聊内容…" rightSection={<ActionIcon onClick={sendPrivateMessage}><IconSend size={15} /></ActionIcon>} /></Stack> : <Text c="dimmed">暂无私聊会话。</Text>}</Tabs.Panel>
+        <Tabs.Panel value="evidence" pt="md">
+          <Stack gap="md">
+            <Group justify="space-between">
+              <Text fw={900}>我的证物</Text>
+              <Badge variant="light">{evidence.length}</Badge>
+            </Group>
+            <Stack gap="sm">
+              {evidence.map((item) => (
+                <Paper key={item.id} p="sm" radius="lg" className="game-clue-item">
+                  <Group justify="space-between">
+                    <Button variant="transparent" p={0} onClick={() => openEvidenceDetail(item)}>
+                      {item.name}
+                    </Button>
+                    <Badge size="xs">{item.visibility}</Badge>
+                  </Group>
+                  <Text size="sm" c="dimmed" mt={5}>{item.description}</Text>
+                  <Text size="xs" mt="sm">获得方式：{item.source}</Text>
+                  <Group gap={6} mt="sm">
+                    <Button size="compact-xs" variant="light" onClick={() => openEvidenceDetail(item)}>查看详情</Button>
+                    <Button
+                      size="compact-xs"
+                      variant="light"
+                      onClick={() => {
+                        if (phase.id !== "discussion") {
+                          showFeedback("只有在线索交流阶段才能出示证物。");
+                          return;
+                        }
+                        if (!isUserSpeaking) {
+                          showFeedback("请先申请发言，轮到你时即可出示证物。");
+                          return;
+                        }
+                        setSelectedEvidenceId(item.id);
+                        setDialog("evidence");
+                      }}
+                    >
+                      出示证物
+                    </Button>
+                  </Group>
+                </Paper>
+              ))}
+            </Stack>
+
+            <Divider />
+            <Group justify="space-between">
+              <Box>
+                <Text fw={900}>已质询线索</Text>
+                <Text size="xs" c="dimmed">证据与关键发言的问答记录</Text>
+              </Box>
+              <Badge color="blue" variant="light">{inquiryRecords.length}</Badge>
+            </Group>
+            {inquiryRecords.length > 0 ? (
+              <Stack gap="sm">
+                {inquiryRecords.map((record) => (
+                  <Paper key={record.id} p="sm" radius="lg" className="game-inquiry-record">
+                    <Group justify="space-between" align="flex-start">
+                      <Box>
+                        <Badge size="xs" color={record.sourceType === "证据" ? "orange" : "blue"} variant="light">
+                          {record.sourceType}
+                        </Badge>
+                        <Text fw={800} mt={5}>{record.sourceTitle}</Text>
+                      </Box>
+                      {record.evidence && (
+                        <Button size="compact-xs" variant="subtle" onClick={() => openEvidenceDetail(record.evidence!)}>
+                          详情
+                        </Button>
+                      )}
+                    </Group>
+                    <Text size="xs" c="dimmed" mt="sm">质询对象：{record.targetName}</Text>
+                    <Text size="sm" mt={6}>问：{record.question}</Text>
+                    <Text size="sm" c="dimmed" mt={6}>答：{record.answer}</Text>
+                  </Paper>
+                ))}
+              </Stack>
+            ) : (
+              <Text size="sm" c="dimmed">尚未对证据或关键发言发起质询。</Text>
+            )}
+          </Stack>
+        </Tabs.Panel>
+        <Tabs.Panel value="chat" pt="md">
+          <Stack gap="md">
+            <Paper p="sm" radius="lg" className="game-private-event">
+              <Group justify="space-between" align="flex-start">
+                <Box>
+                  <Group gap={6}>
+                    <Text fw={900}>白鸦 Agent 申请私聊</Text>
+                    <Badge
+                      size="xs"
+                      color={privateInviteStatus === "未处理" || privateInviteStatus === "稍后处理" ? "orange" : privateInviteStatus === "已接受" ? "teal" : "gray"}
+                    >
+                      {privateInviteStatus}
+                    </Badge>
+                  </Group>
+                  <Text size="sm" c="dimmed" mt={5}>“我发现门禁记录存在一个不适合公开讨论的时间矛盾。”</Text>
+                </Box>
+              </Group>
+              {(privateInviteStatus === "未处理" || privateInviteStatus === "稍后处理") && (
+                <Group gap={6} mt="sm">
+                  <Button size="compact-xs" onClick={() => { setPrivateInviteStatus("已接受"); acceptPrivateInvite("crow"); }}>允许</Button>
+                  <Button size="compact-xs" variant="light" onClick={() => setPrivateInviteStatus("稍后处理")}>稍后</Button>
+                  <Button size="compact-xs" variant="subtle" color="red" onClick={() => setPrivateInviteStatus("已拒绝")}>拒绝</Button>
+                </Group>
+              )}
+            </Paper>
+
+            <Box>
+              <Group
+                justify="space-between"
+                mb={chatHistoryOpen ? "xs" : 0}
+                className="game-chat-history-toggle"
+                onClick={() => setChatHistoryOpen((value) => !value)}
+              >
+                <Group gap="xs">
+                  <Text fw={900}>公共聊天与线索记录</Text>
+                  <Text size="xs" c="dimmed">{chatHistoryOpen ? "收起" : "展开"}</Text>
+                </Group>
+                <Badge variant="light">{events.filter((event) => ["speech", "evidence", "accusation", "inquiry"].includes(event.type)).length}</Badge>
+              </Group>
+              {chatHistoryOpen && (
+                <Stack gap="xs">
+                  {events.filter((event) => ["speech", "evidence", "accusation", "inquiry"].includes(event.type)).map((event) => (
+                    <Paper key={`chat-${event.id}`} p="sm" radius="lg" className="game-chat-history-item">
+                      {event.type === "speech" && <><Text fw={800}>{event.speaker}</Text><Text size="sm" c="dimmed">{event.text}</Text></>}
+                      {event.type === "evidence" && <><Text fw={800}>{event.speaker} 出示证据：{event.evidence.name}</Text><Text size="sm" c="dimmed">{event.reason || event.evidence.description}</Text></>}
+                      {event.type === "accusation" && <><Text fw={800}>怀疑记录</Text><Text size="sm" c="dimmed">{event.actor} 将“{event.sourceTitle}”指向 {event.target}{event.reason ? `：${event.reason}` : ""}</Text></>}
+                      {event.type === "inquiry" && <><Text fw={800}>质询记录 · {event.asker} → {event.target}</Text><Text size="sm">问：{event.question}</Text><Text size="sm" c="dimmed">答：{event.answer}</Text></>}
+                    </Paper>
+                  ))}
+                </Stack>
+              )}
+            </Box>
+
+            <Divider />
+            <Box>
+              <Text fw={900} mb="xs">私聊会话</Text>
+              <Group gap="xs" mb="sm">{privateThreads.map((thread) => <Button key={thread.id} size="xs" variant={thread.id === activeThreadId ? "filled" : "light"} onClick={() => { setActiveThreadId(thread.id); setPrivateThreads((items) => items.map((item) => item.id === thread.id ? { ...item, unread: 0 } : item)); }}>{thread.name}{thread.unread > 0 && ` (${thread.unread})`}</Button>)}</Group>
+              {activeThread ? <Stack gap="sm"><Text fw={900}>{activeThread.name}</Text><Stack gap="xs">{activeThread.messages.map((text, index) => <Paper key={index} p="sm" radius="lg" className="game-private-chat"><Text size="sm">{text}</Text></Paper>)}</Stack><TextInput value={privateMessage} onChange={(event) => setPrivateMessage(event.currentTarget.value)} placeholder="输入私聊内容…" rightSection={<ActionIcon onClick={sendPrivateMessage}><IconSend size={15} /></ActionIcon>} /></Stack> : <Text c="dimmed">暂无私聊会话。</Text>}
+            </Box>
+          </Stack>
+        </Tabs.Panel>
       </ScrollArea>
     </Tabs>
   );
@@ -700,13 +1176,8 @@ function GamePage() {
                           <Badge size="xs" color="red" variant="light">AI</Badge>
                         </Group>
                         <Text size="xs" c="dimmed">{dm?.name} · 主持中</Text>
-                        
-                      </Box> |
-                      {feedback && (
-                          <Text size="s" className="game-dm-progress">
-                            {feedback}
-                          </Text>
-                        )}
+                        {feedback && <Text size="xs" className="game-dm-progress">{feedback}</Text>}
+                      </Box>
                     </Group>
                   </Paper>
                 </Box>
@@ -777,7 +1248,155 @@ function GamePage() {
       </Box>
 
       <Modal opened={dialog === "force"} onClose={() => setDialog(null)} title="指定 Agent 回答" centered><Stack><Select label="选择 Agent" value={targetId} onChange={(value) => setTargetId(value || "crow")} data={agents.map((agent) => ({ value: agent.id, label: `${agent.name} · ${agent.role}` }))} /><Textarea label="需要回答的问题" value={question} onChange={(event) => setQuestion(event.currentTarget.value)} minRows={4} /><Button onClick={confirmForcedAnswer}>确认指定</Button></Stack></Modal>
-      <Modal opened={dialog === "evidence"} onClose={() => setDialog(null)} title="出示证物" centered><Stack><Select label="选择证物" value={selectedEvidenceId} onChange={(value) => setSelectedEvidenceId(value || evidence[0]?.id)} data={evidence.map((item) => ({ value: item.id, label: item.name }))} /><Radio.Group label="公开范围" value={evidenceVisibility} onChange={setEvidenceVisibility}><Stack mt="xs"><Radio value="所有人" label="公开给所有人" /><Radio value="指定角色" label="只分享给指定角色" /></Stack></Radio.Group>{evidenceVisibility === "指定角色" && <Select label="指定角色" value={targetId} onChange={(value) => setTargetId(value || "chen")} data={GAME_PLAYERS.filter((player) => player.id !== "user").map((player) => ({ value: player.id, label: player.name }))} />}<Button onClick={showEvidence}>确认出示</Button></Stack></Modal>
+      <Modal opened={dialog === "evidence"} onClose={() => setDialog(null)} title="出示证物" centered><Stack><Select label="选择证物" value={selectedEvidenceId} onChange={(value) => setSelectedEvidenceId(value || evidence[0]?.id)} data={evidence.map((item) => ({ value: item.id, label: item.name }))} /><Textarea label="出示理由" placeholder="说明这项证据支持或反驳了什么观点" value={evidenceReason} onChange={(event) => setEvidenceReason(event.currentTarget.value)} minRows={3} /><Radio.Group label="公开范围" value={evidenceVisibility} onChange={setEvidenceVisibility}><Stack mt="xs"><Radio value="所有人" label="公开给所有人" /><Radio value="指定角色" label="只分享给指定角色" /></Stack></Radio.Group>{evidenceVisibility === "指定角色" && <Select label="指定角色" value={targetId} onChange={(value) => setTargetId(value || "chen")} data={GAME_PLAYERS.filter((player) => player.id !== "user").map((player) => ({ value: player.id, label: player.name }))} />}<Button onClick={showEvidence}>确认出示</Button></Stack></Modal>
+      <Modal
+        opened={dialog === "evidence-detail"}
+        onClose={() => setDialog(null)}
+        title="证据详情"
+        centered
+        size="lg"
+      >
+        {selectedDetailEvidence && (
+          <Stack gap="md">
+            <Group justify="space-between">
+              <Box>
+                <Text className="monospace-label" size="xs" c="orange.3">evidence archive</Text>
+                <Title order={2}>{selectedDetailEvidence.name}</Title>
+              </Box>
+              <Badge color="orange" variant="light">{selectedDetailEvidence.visibility}</Badge>
+            </Group>
+            <Paper radius="lg" p="lg" className="game-evidence-detail">
+              <Text lh={1.8}>{selectedDetailEvidence.description}</Text>
+              <Divider my="md" />
+              <Stack gap={6}>
+                <Group justify="space-between"><Text c="dimmed">发现地点</Text><Text fw={700}>{selectedDetailEvidence.location}</Text></Group>
+                <Group justify="space-between"><Text c="dimmed">记录时间</Text><Text fw={700}>{selectedDetailEvidence.time}</Text></Group>
+                <Group justify="space-between"><Text c="dimmed">获得方式</Text><Text fw={700}>{selectedDetailEvidence.source}</Text></Group>
+              </Stack>
+            </Paper>
+          </Stack>
+        )}
+      </Modal>
+      <Modal
+        opened={dialog === "discussion-detail"}
+        onClose={() => setDialog(null)}
+        title="公共讨论详情"
+        centered
+        size="xl"
+      >
+        {selectedDiscussionSource && (
+          <Stack gap="lg">
+            <Group justify="space-between" align="flex-start">
+              <Group gap="sm">
+                <Avatar size="lg" color={selectedDiscussionSpeaker?.color || (selectedDiscussionSource.type === "evidence" ? "orange" : selectedDiscussionSource.tone)}>
+                  {(selectedDiscussionSpeaker?.role || selectedDiscussionSource.speaker).slice(0, 1)}
+                </Avatar>
+                <Box>
+                  <Text className="monospace-label" size="xs" c="dimmed">
+                    {selectedDiscussionSource.type === "evidence" ? "evidence statement" : "public statement"}
+                  </Text>
+                  <Title order={3}>{selectedDiscussionSource.speaker}</Title>
+                  {selectedDiscussionSpeaker && <Text size="sm" c="dimmed">{selectedDiscussionSpeaker.role} · {selectedDiscussionSpeaker.publicIdentity}</Text>}
+                </Box>
+              </Group>
+              {selectedDiscussionSuspect && (
+                <Paper p="sm" radius="lg" className="game-discussion-suspect">
+                  <Text size="xs" c="dimmed">当前怀疑对象</Text>
+                  <Group gap="xs" mt={5}>
+                    <Avatar size="sm" color={selectedDiscussionSuspect.color}>{selectedDiscussionSuspect.role.slice(0, 1)}</Avatar>
+                    <Box>
+                      <Text size="sm" fw={800}>{selectedDiscussionSuspect.role}</Text>
+                      <Text size="xs" c="dimmed">{selectedDiscussionSuspect.name}</Text>
+                    </Box>
+                  </Group>
+                </Paper>
+              )}
+            </Group>
+
+            <Paper p="lg" radius="lg" className="game-discussion-copy">
+              <Text lh={1.85}>
+                {selectedDiscussionSource.type === "speech"
+                  ? selectedDiscussionSource.text
+                  : selectedDiscussionSource.reason || selectedDiscussionSource.evidence.description}
+              </Text>
+            </Paper>
+
+            {selectedDiscussionEvidence && (
+              <Paper p="md" radius="lg" className="game-discussion-evidence">
+                <Box className="game-discussion-evidence-image">
+                  <Text className="monospace-label" size="xs" c="dimmed">evidence image</Text>
+                  <Text c="dimmed">证据图片占位</Text>
+                </Box>
+                <Box>
+                  <Group justify="space-between">
+                    <Title order={4}>{selectedDiscussionEvidence.name}</Title>
+                    <Badge color="orange" variant="light">{selectedDiscussionEvidence.visibility}</Badge>
+                  </Group>
+                  <Text size="sm" c="dimmed" mt="sm" lh={1.7}>{selectedDiscussionEvidence.description}</Text>
+                  <Group gap="lg" mt="sm">
+                    <Text size="xs">地点：{selectedDiscussionEvidence.location}</Text>
+                    <Text size="xs">时间：{selectedDiscussionEvidence.time}</Text>
+                  </Group>
+                </Box>
+              </Paper>
+            )}
+
+            <Group justify="flex-end">
+              <Button variant="light" onClick={() => openPointDialog(selectedDiscussionSource.id)}>指向嫌疑人</Button>
+              <Button color="blue" onClick={() => openInquiryDialog(selectedDiscussionSource.id)}>
+                {selectedDiscussionSource.type === "evidence" ? "针对此证据质询" : "针对此发言质询"}
+              </Button>
+            </Group>
+          </Stack>
+        )}
+      </Modal>
+      <Modal opened={dialog === "point"} onClose={() => setDialog(null)} title="将线索指向嫌疑人" centered>
+        <Stack>
+          <Text size="sm" c="dimmed">
+            来源：{discussionSource(selectedDiscussionEventId) ? discussionSourceTitle(discussionSource(selectedDiscussionEventId)!) : "未选择"}
+          </Text>
+          <Select
+            label="你怀疑谁"
+            value={pointTargetId}
+            onChange={(value) => setPointTargetId(value || "chen")}
+            data={GAME_PLAYERS.filter((player) => player.id !== "user" && player.id !== "dm").map((player) => ({
+              value: player.id,
+              label: `${player.role} · ${player.name}`,
+            }))}
+          />
+          <Textarea
+            label="怀疑理由（可选）"
+            value={pointReason}
+            onChange={(event) => setPointReason(event.currentTarget.value)}
+            minRows={3}
+          />
+          <Button onClick={confirmPoint}>确认指向</Button>
+        </Stack>
+      </Modal>
+      <Modal opened={dialog === "inquiry"} onClose={() => setDialog(null)} title="针对线索发起质询" centered size="lg">
+        <Stack>
+          <Text size="sm" c="dimmed">
+            质询来源：{discussionSource(selectedDiscussionEventId) ? discussionSourceTitle(discussionSource(selectedDiscussionEventId)!) : "未选择"}
+          </Text>
+          <Select
+            label="质询对象"
+            value={inquiryTargetId}
+            onChange={(value) => setInquiryTargetId(value || "crow")}
+            data={GAME_PLAYERS.filter((player) => player.id !== "user" && player.id !== "dm").map((player) => ({
+              value: player.id,
+              label: `${player.role} · ${player.name}${player.agent ? " · AI" : " · 真人"}`,
+            }))}
+          />
+          <Textarea
+            label="质询问题"
+            placeholder="说明这项证据或发言与你的疑问之间有什么关系"
+            value={inquiryQuestion}
+            onChange={(event) => setInquiryQuestion(event.currentTarget.value)}
+            minRows={4}
+          />
+          <Button onClick={confirmInquiry}>发起质询并保存记录</Button>
+        </Stack>
+      </Modal>
       <Modal opened={dialog === "private"} onClose={() => setDialog(null)} title="发起或接受私聊" centered><Stack><Select label="私聊对象" value={targetId} onChange={(value) => setTargetId(value || "crow")} data={GAME_PLAYERS.filter((player) => player.id !== "user" && player.id !== "dm").map((player) => ({ value: player.id, label: `${player.role} · 玩家：${player.name}` }))} /><Text size="sm" c="dimmed">私聊建立后即可直接对话，不需要额外设置 Agent 发言权限；私聊内容和证物不会自动公开。</Text><Button onClick={() => acceptPrivateInvite()}>建立私聊</Button></Stack></Modal>
       <Modal opened={dialog === "rules"} onClose={() => setDialog(null)} title="游戏规则" centered size="lg"><Stack><Text>公共讨论采用单一发言权，普通发言按申请顺序进行。</Text><Text>被指定回答的 Agent 必须成为下一位发言者，回答结束后恢复原队列。</Text><Text>私聊与公共讨论独立运行，私聊内容和证物仅参与者可见。</Text><Text>进入投票阶段后停止新的发言、私聊和证物出示。</Text></Stack></Modal>
       <Modal

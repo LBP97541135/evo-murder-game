@@ -86,7 +86,7 @@ pip install -r api/requirements.txt
 cp api/config/.env.example api/config/.env   # 编辑 .env 填入你的 API Key
 
 # 启动服务
-python -m uvicorn api.main:app --reload --port 10000
+python -m uvicorn api.main:app --reload --port 10001
 ```
 
 ### 2. 前端启动
@@ -94,7 +94,7 @@ python -m uvicorn api.main:app --reload --port 10000
 ```bash
 cd web
 npm install
-npm start                    # 默认端口 3000，API指向 localhost:10000
+npm start                    # 默认端口 3000，API指向 localhost:10001
 ```
 
 当前前端是暗黑剧场风格的静态可交互原型，包含 `/library`、`/play/:id`、
@@ -110,7 +110,7 @@ npm start                    # 默认端口 3000，API指向 localhost:10000
 访问前端 `/agents` 页面，或直接调用 API：
 
 ```bash
-curl -X POST http://localhost:10000/agents/register \
+curl -X POST http://localhost:10001/agents/register \
   -H "Content-Type: application/json" \
   -d '{"role": "companion", "name": "小七", "model": "evomap-gemini-3.1-pro-preview"}'
 ```

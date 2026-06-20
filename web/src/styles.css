@@ -552,6 +552,112 @@ a {
   background: rgba(255, 255, 255, 0.025);
 }
 
+.game-discussion-entry {
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.game-discussion-entry:hover {
+  border-color: rgba(77, 171, 247, 0.3);
+  background: rgba(77, 171, 247, 0.055);
+  transform: translateY(-1px);
+}
+
+.game-evidence-link {
+  height: auto;
+  font-weight: 900;
+  text-decoration: underline;
+  text-decoration-color: rgba(250, 176, 5, 0.45);
+  text-underline-offset: 3px;
+}
+
+.game-accusation-event {
+  border: 1px solid rgba(250, 82, 82, 0.28);
+  border-left: 3px solid #fa5252;
+  background: rgba(250, 82, 82, 0.07);
+}
+
+.game-inquiry-event,
+.game-inquiry-record {
+  border: 1px solid rgba(77, 171, 247, 0.24);
+  border-left: 3px solid #4dabf7;
+  background: rgba(77, 171, 247, 0.06);
+}
+
+.game-evidence-detail {
+  border: 1px solid rgba(250, 176, 5, 0.2);
+  background: rgba(250, 176, 5, 0.055);
+}
+
+.game-discussion-suspect {
+  border: 1px solid rgba(250, 82, 82, 0.22);
+  background: rgba(250, 82, 82, 0.06);
+}
+
+.game-discussion-copy {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.game-discussion-evidence {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 18px;
+  border: 1px solid rgba(250, 176, 5, 0.2);
+  background: rgba(250, 176, 5, 0.045);
+}
+
+.game-discussion-evidence-image {
+  display: flex;
+  min-height: 180px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 50% 30%, rgba(250, 176, 5, 0.1), transparent 28%),
+    rgba(255, 255, 255, 0.025);
+}
+
+.game-chat-history-item {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.game-chat-history-toggle {
+  padding: 8px 4px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 160ms ease;
+}
+
+.game-chat-history-toggle:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+@keyframes gameChatTabNudge {
+  0%, 100% { transform: translateY(0); }
+  35% { transform: translateY(-2px); }
+  65% { transform: translateY(1px); }
+}
+
+.game-chat-tab.has-pending-invite {
+  animation: gameChatTabNudge 1.6s ease-in-out infinite;
+}
+
+.game-chat-tab.has-pending-invite::after {
+  content: "";
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff922b;
+  box-shadow: 0 0 8px rgba(255, 146, 43, 0.8);
+}
+
 .game-event-card {
   border: 1px solid rgba(250, 176, 5, 0.24);
   background: linear-gradient(120deg, rgba(250, 176, 5, 0.09), rgba(255, 255, 255, 0.025));
@@ -957,6 +1063,10 @@ a {
   }
 
   .game-suspect-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .game-discussion-evidence {
     grid-template-columns: 1fr;
   }
 

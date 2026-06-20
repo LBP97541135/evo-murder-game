@@ -18,18 +18,27 @@ import {
   IconStarFilled,
   IconUsers,
 } from "@tabler/icons-react";
-import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
-import { scripts } from "./scriptData";
+import { useScript } from "../api/hooks";
 import { StudioShell } from "./StudioShell";
 
 function ScriptDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const script = scripts.find((item) => item.id === id);
+  const { script, loading, error } = useScript(id);
 
   if (!script) {
-    return <Navigate to="/library" replace />;
+    return (
+      <StudioShell title="剧本加载失败" subtitle="" eyebrow="backend error" stats={[]}>
+        <Paper radius="xl" p="xl" className="industrial-card">
+          <Text c={error ? "red" : "dimmed"}>
+            {loading ? "正在从后端加载剧本详情…" : `后端剧本详情加载失败：${error || "未知错误"}`}
+          </Text>
+          <Button mt="md" variant="light" onClick={() => navigate("/library")}>返回剧本库</Button>
+        </Paper>
+      </StudioShell>
+    );
   }
 
   return (

@@ -34,7 +34,22 @@ import {
   IconUserStar,
 } from "@tabler/icons-react";
 
+import { listPersonas, type AgentPersona } from "../api/invoke";
 import { StudioShell } from "./StudioShell";
+
+// ============================
+// 角色立绘
+// ============================
+
+const agentPortraits: Record<string, string> = {
+  "white-crow": new URL("../video_picture/白鸽.png", import.meta.url).href,
+  echo: new URL("../video_picture/回声.png", import.meta.url).href,
+  "paper-owl": new URL("../video_picture/纸鸮.png", import.meta.url).href,
+  "night-cicada": new URL("../video_picture/夜蝉.png", import.meta.url).href,
+  "mist-harbor": new URL("../video_picture/雾港主理人.png", import.meta.url).href,
+  "iron-judge": new URL("../video_picture/铁幕裁判.png", import.meta.url).href,
+  "candle-core": new URL("../video_picture/暮烛引导员.png", import.meta.url).href,
+};
 
 // ============================
 // 类型定义
@@ -91,7 +106,7 @@ type EnsembleTemplate = {
 // 模拟数据
 // ============================
 
-const companionAgents: CompanionAgent[] = [
+const fallbackCompanionAgents: CompanionAgent[] = [
   {
     key: "white-crow",
     name: "白鸦",
@@ -208,7 +223,7 @@ const companionAgents: CompanionAgent[] = [
   },
 ];
 
-const dmAgents: DMAgent[] = [
+const fallbackDmAgents: DMAgent[] = [
   {
     key: "mist-harbor",
     name: "雾港主理人",
@@ -323,8 +338,8 @@ const ensembleTemplates: EnsembleTemplate[] = [
 ];
 
 const allAgentNames: Record<string, string> = {
-  ...Object.fromEntries(companionAgents.map((a) => [a.key, a.name])),
-  ...Object.fromEntries(dmAgents.map((a) => [a.key, a.name])),
+  ...Object.fromEntries(fallbackCompanionAgents.map((a) => [a.key, a.name])),
+  ...Object.fromEntries(fallbackDmAgents.map((a) => [a.key, a.name])),
 };
 
 // ============================
@@ -363,7 +378,7 @@ function AgentIDCard({
           <img
             src={agent.avatar}
             alt={agent.name}
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "center bottom" }}
           />
         ) : (
           <Stack align="center" justify="center" h="100%" gap="xs">
@@ -456,6 +471,7 @@ function AgentCarousel({
   onCardClick: (agent: CompanionAgent | DMAgent) => void;
 }) {
   const featured = agents[activeSlide];
+  const portraitUrl = agentPortraits[featured.key] || "";
 
   if (!featured) return null;
 
@@ -464,6 +480,16 @@ function AgentCarousel({
       radius="xl"
       className="agent-carousel"
       onClick={() => onCardClick(featured)}
+      style={
+        portraitUrl
+          ? {
+              backgroundImage: `linear-gradient(90deg, rgba(12,8,8,0.96) 0%, rgba(12,8,8,0.88) 42%, rgba(12,8,8,0.2) 100%), url(${portraitUrl})`,
+              backgroundPosition: "center, right center",
+              backgroundSize: "cover, auto 100%",
+              backgroundRepeat: "no-repeat, no-repeat",
+            }
+          : undefined
+      }
     >
       <Stack justify="space-between" h="100%" className="agent-carousel__content">
         <Group justify="space-between" align="flex-start">
@@ -564,9 +590,66 @@ function AgentCarousel({
 // ============================
 
 function AgentPanel() {
+  const [companionAgents, setCompanionAgents] = React.useState<CompanionAgent[]>([]);
+  const [dmAgents, setDmAgents] = React.useState<DMAgent[]>([]);
+  const [backendStatus, setBackendStatus] = React.useState("正在加载后端 Agent 人设…");
+  const [backendError, setBackendError] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState<"playmate" | "dm" | "ensemble">(
     "playmate"
   );
+
+  React.useEffect(() => {
+    const toCompanion = (persona: AgentPersona): CompanionAgent => ({
+      key: persona.key,
+      name: persona.name,
+      avatar: agentPortraits[persona.key] || "",
+      vibe: persona.vibe,
+      style: persona.style,
+      genius: persona.genius || [],
+      personality: persona.personality || [],
+      scriptTypes: persona.scriptTypes || [],
+      activeLevel: (persona.activeLevel || "中") as CompanionAgent["activeLevel"],
+      playTime: "全天",
+      rating: persona.rating || 4.5,
+      history: `历史协作 ${persona.historyCount || 0} 局`,
+      highlight: persona.genius?.[0] || "通用 Agent",
+      oneliner: persona.style || persona.vibe,
+      roleMatch: persona.roleMatch,
+      reason: persona.reason,
+      isFavorited: false,
+    });
+    const toDm = (persona: AgentPersona): DMAgent => ({
+      key: persona.key,
+      name: persona.name,
+      avatar: agentPortraits[persona.key] || "",
+      vibe: persona.vibe,
+      pace: (persona.pace || "中") as DMAgent["pace"],
+      focus: persona.scriptTypes || [],
+      strengths: persona.strengths || persona.genius || [],
+      promptStyle: persona.promptStyle,
+      fairness: persona.fairness,
+      rating: persona.rating || 4.5,
+      runs: `主持 ${persona.historyCount || 0} 局`,
+      playTime: "全天",
+      highlight: persona.strengths?.[0] || "DM Agent",
+      oneliner: persona.style || persona.vibe,
+      isFavorited: false,
+    });
+
+    listPersonas()
+      .then((personas) => {
+        const companions = personas.filter((item) => item.role === "companion").map(toCompanion);
+        const dms = personas.filter((item) => item.role === "dm").map(toDm);
+        if (companions.length) setCompanionAgents(companions);
+        if (dms.length) setDmAgents(dms);
+        setBackendError(false);
+        setBackendStatus(personas.length ? `已接入后端人设库，共 ${personas.length} 个 Agent` : "后端人设库为空");
+      })
+      .catch((error) => {
+        setBackendError(true);
+        setBackendStatus(`后端 Agent 加载失败：${error instanceof Error ? error.message : String(error)}`);
+      });
+  }, []);
 
   // ---- 通用 ----
   const [query, setQuery] = React.useState("");
@@ -1432,6 +1515,9 @@ function AgentPanel() {
       ]}
     >
       <Stack gap="xl">
+        <Paper radius="xl" p="sm" className="industrial-card">
+          <Text size="sm" c={backendError ? "red" : "dimmed"}>{backendStatus}</Text>
+        </Paper>
         {/* 横向标签导航 */}
         {renderTabs()}
 

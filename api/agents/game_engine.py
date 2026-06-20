@@ -226,6 +226,8 @@ class GameEngine:
                 game_state = {
                     "game_id": gs.session_id,
                     "script_id": gs.script_id or "",
+                    "player_role_id": gs.result.get("player_role_id", "") if gs.result else "",
+                    "player_character": gs.result.get("player_character", {}) if gs.result else {},
                     "current_phase": gs.current_phase or GamePhase.INTRO,
                     "phase_history": gs.phase_history or [],
                     "votes": gs.result.get("votes", []) if gs.result else [],
@@ -269,7 +271,7 @@ class GameEngine:
         finally:
             db_session.close()
 
-    def create_game(self, script_id: str, session_id: str = "") -> dict:
+    def create_game(self, script_id: str, session_id: str = "", player_role_id: str = "") -> dict:
         """创建新游戏实例。
 
         同步初始化所有 Agent 的游戏状态（角色分配+胶囊注入）。
@@ -279,6 +281,8 @@ class GameEngine:
         game_state = {
             "game_id": game_id,
             "script_id": script_id,
+            "player_role_id": player_role_id,
+            "player_character": {},
             "current_phase": GamePhase.INTRO,
             "phase_history": [{"phase": GamePhase.INTRO, "entered_at": datetime.now(timezone.utc).isoformat()}],
             "votes": [],
@@ -322,6 +326,36 @@ class GameEngine:
             db_session.close()
 
         # 为每个 Agent 创建游戏状态
+        player_role_id = game_state.get("player_role_id", "")
+        player_character = None
+        remaining_characters = list(characters)
+        if player_role_id:
+            for index, character in enumerate(characters):
+                if character.id == player_role_id:
+                    player_character = character
+                    remaining_characters.pop(index)
+                    break
+
+        if player_character:
+            game_state["player_character"] = {
+                "id": player_character.id,
+                "name": player_character.name,
+                "bio": player_character.bio or "",
+                "personality": player_character.personality or "",
+                "context": player_character.context or "",
+                "secret": player_character.secret or "",
+                "violation": player_character.violation or "",
+                "image": player_character.image_filename or player_character.image or "officer.png",
+                "isVictim": player_character.is_victim,
+                "isKiller": player_character.is_killer,
+                "isAssistant": player_character.is_assistant,
+                "isPlayer": True,
+                "isPartner": player_character.is_partner,
+                "roleType": player_character.role_type,
+            }
+        else:
+            game_state["player_character"] = {}
+
         companion_idx = 0
         for key, agent in orchestrator.agents.items():
             if agent.role.value == "assistant":
@@ -332,8 +366,8 @@ class GameEngine:
             state.global_story = global_story
 
             # 分配角色（companion 按顺序分配角色，DM 不分配角色）
-            if agent.role.value == "companion" and companion_idx < len(characters):
-                ch = characters[companion_idx]
+            if agent.role.value == "companion" and companion_idx < len(remaining_characters):
+                ch = remaining_characters[companion_idx]
                 state.character = {
                     "id": ch.id,
                     "name": ch.name,
@@ -1063,6 +1097,8 @@ class GameEngine:
                 "vote_result": game_state.get("vote_result"),
                 "hints_used": game_state.get("hints_used", 0),
                 "chat_count": game_state.get("chat_count", 0),
+                "player_role_id": game_state.get("player_role_id", ""),
+                "player_character": game_state.get("player_character", {}),
             }
 
             if game_state.get("ended_at"):

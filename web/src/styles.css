@@ -732,6 +732,7 @@ a {
   background: rgba(250, 176, 5, 0.42);
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
+  cursor: pointer;
 }
 
 .game-script-modal-chapter {

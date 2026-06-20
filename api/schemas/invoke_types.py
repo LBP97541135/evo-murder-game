@@ -108,6 +108,7 @@ class GameSessionRequest(BaseModel):
     """创建游戏 Session 请求。"""
     script_id: str = ""
     topic: str = ""
+    player_role_id: str = ""
 
 
 class GameSessionResponse(BaseModel):

@@ -6,15 +6,21 @@ EvoMap Murder Game - SQLAlchemy Database Models
 """
 
 import json
+import os
+import stat
 from sqlalchemy import (
     Column, String, Text, Integer, Float, Boolean, JSON,
     DateTime, ForeignKey, create_engine,
 )
-from sqlalchemy.orm import DeclarativeBase, relationship, Session
+from sqlalchemy.orm import DeclarativeBase, relationship, Session, sessionmaker
 from datetime import datetime, timezone
 from typing import Optional
 
 from api.config.settings import DB_CONN_URL, SQLITE_PATH
+
+
+_ENGINE = None
+_SESSION_FACTORY = None
 
 
 class Base(DeclarativeBase):
@@ -905,22 +911,54 @@ def dict_to_evidence_record(data: dict, evidence: Optional["EvidenceRecord"] = N
 # Database Setup
 # ============================
 
+def _resolve_sqlite_path() -> str:
+    if os.path.isabs(SQLITE_PATH):
+        return SQLITE_PATH
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    return os.path.abspath(os.path.join(repo_root, SQLITE_PATH))
+
+
+def _ensure_sqlite_writable(db_path: str) -> None:
+    db_dir = os.path.dirname(db_path)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
+        try:
+            os.chmod(db_dir, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+        except OSError:
+            pass
+
+    if os.path.exists(db_path):
+        try:
+            os.chmod(db_path, stat.S_IWRITE | stat.S_IREAD)
+        except OSError:
+            pass
+
 def get_engine():
     """获取数据库引擎——PostgreSQL（如果配置）否则 SQLite。"""
+    global _ENGINE, _SESSION_FACTORY
+    if _ENGINE is not None:
+        return _ENGINE
     if DB_CONN_URL:
-        return create_engine(DB_CONN_URL, echo=False)
-    return create_engine(f"sqlite:///{SQLITE_PATH}", echo=False)
+        _ENGINE = create_engine(DB_CONN_URL, echo=False)
+    else:
+        sqlite_path = _resolve_sqlite_path()
+        _ensure_sqlite_writable(sqlite_path)
+        _ENGINE = create_engine(
+            f"sqlite:///{sqlite_path}",
+            echo=False,
+            connect_args={"check_same_thread": False},
+        )
+    _SESSION_FACTORY = sessionmaker(bind=_ENGINE)
+    return _ENGINE
 
 
 def init_db():
     """初始化数据库——创建所有表（幂等，仅新增不覆盖）。"""
-    import os
     engine = get_engine()
     # 确保 SQLite 数据库目录存在
-    db_path = SQLITE_PATH
-    db_dir = os.path.dirname(db_path)
-    if db_dir and not os.path.exists(db_dir):
-        os.makedirs(db_dir, exist_ok=True)
+    if not DB_CONN_URL:
+        db_path = _resolve_sqlite_path()
+        _ensure_sqlite_writable(db_path)
     Base.metadata.create_all(engine)
 
     # 运行时 migration：检查并补充缺失的列
@@ -951,5 +989,5 @@ def _run_migrations(engine):
 
 def get_session():
     """获取 SQLAlchemy Session。"""
-    engine = get_engine()
-    return Session(engine)
+    get_engine()
+    return _SESSION_FACTORY()

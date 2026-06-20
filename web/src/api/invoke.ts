@@ -304,14 +304,15 @@ export const autoMatchPersonas = (scriptGenre: string, difficulty: string) =>
     difficulty,
   });
 
-export const createGameSession = async (scriptId: string, topic: string) => {
+export const createGameSession = async (scriptId: string, topic: string, playerRoleId = "") => {
   const result = await post<{ session_id: string; participants: string[]; status: string }>(
     "/game/create-session",
-    { script_id: scriptId, topic },
+    { script_id: scriptId, topic, player_role_id: playerRoleId },
   );
   return { sessionId: result.session_id, participants: result.participants, status: result.status };
 };
 export const getGamePhase = (sessionId: string) => get<Record<string, any>>(`/game/phase/${sessionId}`);
+export const getGameSessionInfo = (sessionId: string) => get<Record<string, any>>(`/game/session-info/${sessionId}`);
 export const advanceGamePhase = (sessionId: string) => post<Record<string, any>>(`/game/phase/${sessionId}/advance`);
 export const forceGamePhase = (sessionId: string, phase: string) =>
   post<Record<string, any>>(`/game/phase/${sessionId}/force`, { phase });

@@ -82,7 +82,11 @@ async def create_game_session(req: GameSessionRequest):
     session_info = orchestrator.sessions.get(session_id, {})
 
     # 初始化游戏引擎（同时初始化 Agent 游戏状态 + 胶囊注入）
-    game_engine.create_game(script_id=req.script_id, session_id=session_id)
+    game_engine.create_game(
+        script_id=req.script_id,
+        session_id=session_id,
+        player_role_id=req.player_role_id,
+    )
 
     return GameSessionResponse(
         session_id=session_id,
@@ -285,6 +289,7 @@ async def get_session_info(session_id: str):
         "success": True,
         "session_id": session_id,
         "phase": phase_info,
+        "player": game.get("player_character"),
         "agents": agents_info,
         "speak_round": speak_round,
         "script_id": game.get("script_id", ""),

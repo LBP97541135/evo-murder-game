@@ -38,7 +38,7 @@ function EvolutionTimeline() {
 
   return (
     <StudioShell
-      title="个人助手中枢"
+      title="个人助手中枢（Mock）"
       subtitle="把用户画像、系统标签、剧本与 Agent 推荐、游玩总结以及开局前助手集中到一个暗色控制台里，作为每次开局前的决策入口。"
       eyebrow="assistant / evolution / profile"
       stats={[

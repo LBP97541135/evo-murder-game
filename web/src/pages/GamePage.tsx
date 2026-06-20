@@ -49,17 +49,21 @@ import {
   SEARCH_EVIDENCE,
 } from "./gameMockData";
 import { backendEvidenceToGameEvidence } from "../api/adapters";
+import { useScript } from "../api/hooks";
 import {
+  advanceGamePhase,
   createEvidence,
   createGameSession,
   forceGamePhase,
+  getConversations,
   getGamePhase,
+  getGameSessionInfo,
   getEvidences,
   presentEvidence,
   saveConversation,
   submitGameVote,
 } from "../api/invoke";
-import { AgentCastingPanel } from "../components/AgentCastingPanel";
+import { AgentCastingPanel, HUMAN_PLAYER } from "../components/AgentCastingPanel";
 import { StudioShell } from "./StudioShell";
 
 // ============================
@@ -84,6 +88,79 @@ const scriptMap: Record<string, string> = {
   "wolf-assembly": "狼群集会",
   "paper-cathedral": "纸穹教堂",
 };
+
+const ROLE_NAME_ALIASES: Record<string, string> = {
+  user: "周野",
+  chen: "顾沉",
+  crow: "沈哲",
+  su: "周枝",
+  echo: "秦野",
+  zhouye: "周野",
+  guchen: "顾沉",
+  shenzhe: "沈哲",
+  zhouzhi: "周枝",
+  qinye: "秦野",
+  "zhou-ye": "周野",
+  "gu-chen": "顾沉",
+  "shen-zhe": "沈哲",
+  "zhou-zhi": "周枝",
+  "qin-ye": "秦野",
+  "周野": "周野",
+  "顾沉": "顾沉",
+  "沈哲": "沈哲",
+  "周枝": "周枝",
+  "秦野": "秦野",
+};
+
+const PLAYER_NAME_ALIASES: Record<string, string> = {
+  user: "鏋楁檽闈?",
+  chen: "闄堝ⅷ",
+  crow: "鐧介甫",
+  su: "鑻忛",
+  echo: "鍥炲０",
+  "white-crow": "鐧介甫",
+  "paper-owl": "绾搁府",
+  flint: "鐕х煶",
+  "luna-moth": "鏈堣浘",
+  "night-cicada": "澶滆潐",
+  "mist-harbor": "闆炬腐涓荤悊浜?",
+  "candle-core": "鐑涜姱",
+  "iron-judge": "閾侀潰瑁佸喅鑰?",
+  "shadow-weaver": "褰辩粐鑰?",
+};
+
+const ROLE_TO_INTRO_KEY: Record<string, string> = {
+  "鍛ㄩ噹": "user",
+  "椤炬矇": "chen",
+  "娌堢": "crow",
+  "鍛ㄥ矚": "su",
+  "绉﹂噹": "echo",
+};
+
+function normalizeRoleToken(value: unknown) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/agent/g, "")
+    .replace(/[^a-z0-9\u4e00-\u9fa5]/g, "");
+}
+
+function resolveRoleName(value: unknown, fallback = "") {
+  const raw = String(value || "").trim();
+  const normalized = normalizeRoleToken(raw);
+  return ROLE_NAME_ALIASES[raw] || ROLE_NAME_ALIASES[normalized] || fallback || raw || "未知角色";
+}
+
+function getRolePortrait(role: unknown, fallback = "") {
+  const resolved = resolveRoleName(role, fallback);
+  const fallbackResolved = resolveRoleName(fallback);
+  return characterPortraits[resolved] || characterPortraits[fallbackResolved];
+}
+
+function resolvePlayerName(value: unknown, fallback = "") {
+  const raw = String(value || "").trim();
+  const normalized = normalizeRoleToken(raw);
+  return PLAYER_NAME_ALIASES[raw] || PLAYER_NAME_ALIASES[normalized] || fallback || raw || "鐜╁";
+}
 
 type PublicEvent =
   | { id: number; type: "speech"; speaker: string; text: string; tone: string; suspectId?: string; evidenceId?: string }
@@ -133,6 +210,25 @@ type ScriptHighlight = {
   text: string;
 };
 
+type RuntimePlayer = {
+  id: string;
+  name: string;
+  role: string;
+  publicIdentity: string;
+  agent: boolean;
+  color: string;
+  status: string;
+  tags: string[];
+  background: string;
+  backendKey?: string;
+};
+
+type SessionInfo = {
+  player?: Record<string, any>;
+  agents?: Array<Record<string, any>>;
+  phase?: Record<string, any>;
+};
+
 const initialEvents: PublicEvent[] = [
   { id: 1, type: "system", title: "阶段开始", text: "公共讨论已开启，所有发言按照队列顺序进行。" },
   {
@@ -159,9 +255,22 @@ function formatTime(totalSeconds: number) {
   return `${String(Math.floor(totalSeconds / 60)).padStart(2, "0")}:${String(totalSeconds % 60).padStart(2, "0")}`;
 }
 
+function emptyCastingSeats(count: number) {
+  return Array.from({ length: count }, (_, index) => `seat-${index}`);
+}
+
+function resolveIntroLine(player: Pick<RuntimePlayer, "id" | "role"> | null) {
+  if (!player) return "";
+  const direct = INTRO_LINES[player.id];
+  if (direct) return direct;
+  const roleKey = ROLE_TO_INTRO_KEY[resolveRoleName(player.role)];
+  return roleKey ? INTRO_LINES[roleKey] || "" : "";
+}
+
 function GamePage() {
   const navigate = useNavigate();
   const { id = "iron-avenue" } = useParams();
+  const { rawScript } = useScript(id);
   const scriptTitle = scriptMap[id] || "未知剧本";
   const gameMode = id === "black-archive" ? "单人游戏" : "真人组队";
   const { ref: fullscreenRef, toggle: toggleFullscreen, fullscreen } = useFullscreen();
@@ -172,6 +281,7 @@ function GamePage() {
   );
   const phase = GAME_PHASES[phaseIndex];
   const [selectedRole, setSelectedRole] = React.useState("");
+  const [castingSeats, setCastingSeats] = React.useState<string[]>(() => emptyCastingSeats(ROLE_OPTIONS.length));
   const [roleConfirmed, setRoleConfirmed] = React.useState(false);
   const [chapter, setChapter] = React.useState(0);
   const [readingDone, setReadingDone] = React.useState(false);
@@ -187,17 +297,19 @@ function GamePage() {
   const [selectedScriptText, setSelectedScriptText] = React.useState("");
   const [selectedScriptChapter, setSelectedScriptChapter] = React.useState(0);
   const [introduced, setIntroduced] = React.useState<string[]>([]);
+  const [sessionInfo, setSessionInfo] = React.useState<SessionInfo | null>(null);
+  const [backendCanAdvance, setBackendCanAdvance] = React.useState(false);
   const [searchesLeft, setSearchesLeft] = React.useState(2);
   const [evidence, setEvidence] = React.useState<Evidence[]>([]);
   const [newEvidence, setNewEvidence] = React.useState<Evidence | null>(null);
-  const [queue, setQueue] = React.useState<string[]>(["chen", "crow"]);
-  const [currentSpeaker, setCurrentSpeaker] = React.useState<string | null>("chen");
+  const [queue, setQueue] = React.useState<string[]>([]);
+  const [currentSpeaker, setCurrentSpeaker] = React.useState<string | null>(null);
   const [forcedAnswer, setForcedAnswer] = React.useState<{ asker: string; agentId: string; question: string } | null>(null);
-  const [events, setEvents] = React.useState<PublicEvent[]>(initialEvents);
+  const [events, setEvents] = React.useState<PublicEvent[]>([]);
   const [rightTab, setRightTab] = React.useState<string | null>("script");
   const [dialog, setDialog] = React.useState<DialogType>(null);
   const [selectedPlayerId, setSelectedPlayerId] = React.useState<string | null>(null);
-  const [targetId, setTargetId] = React.useState("crow");
+  const [targetId, setTargetId] = React.useState("");
   const [question, setQuestion] = React.useState("");
   const [selectedEvidenceId, setSelectedEvidenceId] = React.useState("");
   const [evidenceVisibility, setEvidenceVisibility] = React.useState("所有人");
@@ -213,12 +325,12 @@ function GamePage() {
   const [voteReason, setVoteReason] = React.useState("");
   const [voteEvidence, setVoteEvidence] = React.useState<string[]>([]);
   const [voteSubmitted, setVoteSubmitted] = React.useState(false);
-  const [introSpotlight, setIntroSpotlight] = React.useState<(typeof GAME_PLAYERS)[number] | null>(null);
+  const [introSpotlight, setIntroSpotlight] = React.useState<RuntimePlayer | null>(null);
   const [selectedDiscussionEventId, setSelectedDiscussionEventId] = React.useState<number | null>(null);
   const [selectedDetailEvidence, setSelectedDetailEvidence] = React.useState<Evidence | null>(null);
-  const [pointTargetId, setPointTargetId] = React.useState("chen");
+  const [pointTargetId, setPointTargetId] = React.useState("");
   const [pointReason, setPointReason] = React.useState("");
-  const [inquiryTargetId, setInquiryTargetId] = React.useState("crow");
+  const [inquiryTargetId, setInquiryTargetId] = React.useState("");
   const [inquiryQuestion, setInquiryQuestion] = React.useState("");
   const [inquiryRecords, setInquiryRecords] = React.useState<InquiryRecord[]>([]);
   const [privateInviteStatus, setPrivateInviteStatus] = React.useState<"未处理" | "稍后处理" | "已接受" | "已拒绝">("未处理");
@@ -235,7 +347,9 @@ function GamePage() {
     if (!sessionId) return;
     getEvidences(id, sessionId)
       .then((result) => {
-        const records = result.evidences.map(backendEvidenceToGameEvidence);
+        const records = Array.from(
+          new Map(result.evidences.map(backendEvidenceToGameEvidence).map((item) => [item.id, item])).values(),
+        );
         setEvidence(records);
         setSelectedEvidenceId((current) => current || records[0]?.id || "");
       })
@@ -244,15 +358,183 @@ function GamePage() {
       });
   }, [id, sessionId]);
 
-  const playerById = (playerId: string | null) => GAME_PLAYERS.find((item) => item.id === playerId);
+  React.useEffect(() => {
+    if (!sessionId) return;
+    getGameSessionInfo(sessionId)
+      .then((result) => {
+        setSessionInfo(result as SessionInfo);
+        setBackendCanAdvance(Boolean(result?.phase?.can_advance));
+      })
+      .catch(() => {
+        setSessionInfo(null);
+        setBackendCanAdvance(false);
+      });
+  }, [sessionId, phaseIndex]);
+
+  React.useEffect(() => {
+    if (!sessionId) return;
+    getConversations(sessionId)
+      .then((result) => {
+        const mapped: PublicEvent[] = (result.conversations || [])
+          .filter((item: Record<string, any>) => item.finalResponse)
+          .map((item: Record<string, any>, index: number) => {
+            const actorName = String(item.actorName || "");
+            const playerSpeaker = resolveRoleName(sessionInfo?.player?.name || selectedRoleData?.role, "玩家");
+            const matchedAgent = (sessionInfo?.agents || []).find((agent) =>
+              [String(agent.key || ""), String(agent.name || "")].includes(actorName),
+            );
+            const speaker = actorName === "player"
+              ? playerSpeaker
+              : matchedAgent
+                ? resolveRoleName(matchedAgent.name || matchedAgent.key, String(matchedAgent.name || actorName))
+                : resolveRoleName(actorName, actorName);
+            return {
+              id: Date.now() + index,
+              type: "speech",
+              speaker,
+              text: String(item.finalResponse || ""),
+              tone: actorName === "player" ? "orange" : "blue",
+            } as PublicEvent;
+          });
+        setEvents((current) => {
+          const localNonSpeech = current.filter((item) => item.type !== "speech");
+          return [...mapped, ...localNonSpeech];
+        });
+      })
+      .catch(() => undefined);
+  }, [selectedRole, sessionId, sessionInfo]);
+
+  const roleOptions = React.useMemo(() => {
+    const characters = rawScript?.characters || [];
+    if (!characters.length) return ROLE_OPTIONS;
+    return characters.map((character: Record<string, any>, index: number) => ({
+      id: String(character.id || `role-${index}`),
+      role: resolveRoleName(character.name || character.id, ROLE_OPTIONS[index]?.role || `角色 ${index + 1}`),
+      publicIdentity: String(character.bio || character.roleType || "身份未知"),
+      background: String(character.context || character.personality || character.bio || ""),
+      tags: [
+        character.roleType ? String(character.roleType) : "",
+        character.isKiller ? "关键角色" : "",
+        character.isVictim ? "受害者线" : "",
+      ].filter(Boolean),
+      color: ROLE_OPTIONS[index]?.color || GAME_PLAYERS[index]?.color || "gray",
+    }));
+  }, [rawScript]);
+
+  React.useEffect(() => {
+    setCastingSeats((current) => {
+      if (current.length === roleOptions.length) return current;
+      const next = emptyCastingSeats(roleOptions.length);
+      current.slice(0, roleOptions.length).forEach((seat, index) => {
+        next[index] = seat;
+      });
+      return next;
+    });
+  }, [roleOptions.length]);
+
+  const selectedRoleData = roleOptions.find((item) => item.id === selectedRole);
+  const backendPlayers = React.useMemo<RuntimePlayer[]>(() => {
+    if (!sessionInfo) return [];
+    const playerCharacter = sessionInfo.player;
+    const runtime: RuntimePlayer[] = [];
+    if (playerCharacter) {
+      runtime.push({
+        id: "user",
+        name: resolvePlayerName("user", "玩家"),
+        role: resolveRoleName(playerCharacter.name || playerCharacter.id, selectedRoleData?.role || "未选角色"),
+        publicIdentity: String(playerCharacter.bio || ""),
+        background: String(playerCharacter.context || playerCharacter.personality || ""),
+        tags: [String(playerCharacter.roleType || "")].filter(Boolean),
+        color: "orange",
+        status: "",
+        agent: false,
+      });
+    }
+    (sessionInfo.agents || [])
+      .filter((agent) => agent.role_type !== "dm")
+      .forEach((agent, index) => {
+        runtime.push({
+          id: String(agent.key || `agent-${index}`),
+          name: resolvePlayerName(
+            agent.key || agent.name,
+            GAME_PLAYERS.find((player) => player.id === agent.key)?.name || String(agent.key || `agent-${index}`),
+          ),
+          role: resolveRoleName(agent.name || agent.key, `角色 ${index + 1}`),
+          publicIdentity: String(agent.role_type || "companion"),
+          background: "",
+          tags: [String(agent.role_type || "companion")],
+          color: GAME_PLAYERS[index + 1]?.color || "blue",
+          status: "",
+          agent: true,
+          backendKey: String(agent.key || ""),
+        });
+      });
+    return runtime;
+  }, [selectedRoleData?.role, sessionInfo]);
+
+  const players: RuntimePlayer[] = backendPlayers.length
+    ? backendPlayers
+    : GAME_PLAYERS.map((player) =>
+        player.id === "user" && selectedRoleData
+          ? {
+              ...player,
+              role: selectedRoleData.role,
+              publicIdentity: selectedRoleData.publicIdentity,
+              background: selectedRoleData.background,
+              tags: selectedRoleData.tags,
+            }
+          : player,
+      );
+  const playerById = (playerId: string | null) => players.find((item) => item.id === playerId);
   const current = playerById(currentSpeaker);
+  const userPlayer = playerById("user");
+  const userSpeakerName = userPlayer?.role || sessionInfo?.player?.name || selectedRoleData?.role || "玩家";
   const isUserSpeaking = currentSpeaker === "user";
   const userQueued = queue.includes("user");
-  const currentIntroId = ["user", "chen", "crow", "su", "echo"].find((playerId) => !introduced.includes(playerId));
+  const currentIntroId = players.filter((player) => player.id !== "dm").map((player) => player.id).find((playerId) => !introduced.includes(playerId));
+  const introRoleId = currentIntroId === "user" && selectedRole ? selectedRole : currentIntroId;
   const selectedPlayer = playerById(selectedPlayerId);
   const activeThread = privateThreads.find((item) => item.id === activeThreadId);
-  const agents = GAME_PLAYERS.filter((player) => player.agent && player.id !== "dm");
-  const dm = playerById("dm");
+  const agents = players.filter((player) => player.agent && player.id !== "dm");
+  const privateInvitePlayer = agents[0];
+  const dm = GAME_PLAYERS.find((item) => item.id === "dm");
+  const participantOptions = players
+    .filter((player) => player.id !== "user" && player.id !== "dm")
+    .map((player) => ({
+      value: player.id,
+      label: `${player.role} · 玩家：${player.name}${player.agent ? " · AI" : ""}`,
+    }));
+  const castingSidebarEntries = roleOptions.map((role, index) => {
+    const assignment = castingSeats[index];
+    const assignedAgent = assignment && assignment !== HUMAN_PLAYER && !assignment.startsWith("seat-")
+      ? assignment
+      : "";
+    return {
+      ...role,
+      assignment,
+      occupant: assignment === HUMAN_PLAYER
+        ? "我 · 真人玩家"
+        : assignedAgent
+          ? `${assignedAgent} · Agent`
+          : "待选择",
+    };
+  });
+
+  React.useEffect(() => {
+    const firstOtherPlayer = players.find((player) => player.id !== "user" && player.id !== "dm");
+    if (!firstOtherPlayer) return;
+    setTargetId((currentId) => currentId || firstOtherPlayer.id);
+    setPointTargetId((currentId) => currentId || firstOtherPlayer.id);
+    setInquiryTargetId((currentId) => currentId || firstOtherPlayer.id);
+  }, [players]);
+
+  React.useEffect(() => {
+    if (phase.id !== "discussion") return;
+    const discussionPlayers = players.filter((player) => player.id !== "user" && player.id !== "dm").map((player) => player.id);
+    if (!discussionPlayers.length) return;
+    setQueue((currentQueue) => currentQueue.length ? currentQueue : discussionPlayers);
+    setCurrentSpeaker((currentId) => currentId || discussionPlayers[0] || null);
+  }, [phase.id, players]);
 
   React.useEffect(() => {
     try {
@@ -267,6 +549,12 @@ function GamePage() {
   };
 
   const showFeedback = (text: string) => setFeedback(text);
+  const refreshBackendPhase = () => {
+    if (!sessionId) return;
+    getGamePhase(sessionId)
+      .then((result) => setBackendCanAdvance(Boolean(result?.can_advance)))
+      .catch(() => undefined);
+  };
 
   const confirmRoleSelection = async () => {
     if (!selectedRole) return;
@@ -275,7 +563,7 @@ function GamePage() {
       if (activeSessionId) {
         await getGamePhase(activeSessionId);
       } else {
-        const session = await createGameSession(id, `剧本游戏：${scriptTitle}`);
+        const session = await createGameSession(id, `剧本游戏：${scriptTitle}`, selectedRole);
         activeSessionId = session.sessionId;
         setSessionId(activeSessionId);
         window.localStorage.setItem(`game-session:${id}`, activeSessionId);
@@ -320,8 +608,9 @@ function GamePage() {
     setPhaseIndex(index);
     setSpeakerSeconds(90);
     if (GAME_PHASES[index].id === "discussion") {
-      setCurrentSpeaker("chen");
-      setQueue(["chen", "crow"]);
+      const discussionPlayers = players.filter((player) => player.id !== "user" && player.id !== "dm").map((player) => player.id);
+      setCurrentSpeaker(discussionPlayers[0] || null);
+      setQueue(discussionPlayers);
     }
   };
 
@@ -350,7 +639,7 @@ function GamePage() {
     if (forcedAnswer && currentSpeaker === forcedAnswer.agentId) {
       addEvent({
         type: "speech",
-        speaker: `${playerById(forcedAnswer.agentId)?.name} Agent`,
+        speaker: `${playerById(forcedAnswer.agentId)?.role || playerById(forcedAnswer.agentId)?.name || "Agent"} Agent`,
         text: `关于“${forcedAnswer.question}”，我认为值班表压痕说明修改发生在旧终端，而钥匙的持有者需要重点排查。`,
         tone: "blue",
       });
@@ -370,7 +659,6 @@ function GamePage() {
     const introPlayer = playerById(currentIntroId);
     if (!introPlayer) return;
     setIntroduced((items) => [...items, currentIntroId]);
-    addEvent({ type: "speech", speaker: introPlayer.name, text: INTRO_LINES[currentIntroId], tone: introPlayer.color || "gray" });
     setIntroSpotlight(introPlayer);
     showFeedback(`${introPlayer.name} 已完成自我介绍。`);
   };
@@ -398,7 +686,11 @@ function GamePage() {
       setSearchesLeft((value) => value - 1);
       showFeedback(`搜证成功：后端已保存“${saved.name}”。`);
     } catch (error) {
-      showFeedback(`后端搜证失败：${error instanceof Error ? error.message : String(error)}`);
+      setEvidence((items) => [...items, found]);
+      setSelectedEvidenceId((currentId) => currentId || found.id);
+      setNewEvidence(found);
+      setSearchesLeft((value) => value - 1);
+      showFeedback(`后端搜证保存失败，已转为本地记录：${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
@@ -406,9 +698,9 @@ function GamePage() {
     if (!isUserSpeaking) return showFeedback("只有在自己发言时才能指定 Agent 回答。");
     const agent = playerById(targetId);
     if (!question.trim() || !agent) return showFeedback("请选择 Agent 并填写问题。");
-    setForcedAnswer({ asker: "林晓青", agentId: targetId, question });
+    setForcedAnswer({ asker: userSpeakerName, agentId: targetId, question });
     setQueue((items) => [targetId, ...items.filter((item) => item !== targetId && item !== currentSpeaker)]);
-    addEvent({ type: "forced", asker: "林晓青", agent: agent.name, question });
+    addEvent({ type: "forced", asker: userSpeakerName, agent: agent.name, question });
     setDialog(null);
     setQuestion("");
     showFeedback(`${agent.name} 已被指定为下一位发言者，其他角色不可插队。`);
@@ -435,7 +727,7 @@ function GamePage() {
     setEvidence((items) => items.map((entry) => entry.id === item.id ? { ...entry, visibility: evidenceVisibility as Evidence["visibility"] } : entry));
     addEvent({
       type: "evidence",
-      speaker: "林晓青",
+      speaker: userSpeakerName,
       evidence: { ...item, visibility: evidenceVisibility as Evidence["visibility"] },
       reason: evidenceReason.trim() || undefined,
     });
@@ -479,8 +771,9 @@ function GamePage() {
         chatMessages: [{ role: "user", content }],
         finalResponse: content,
       });
-      addEvent({ type: "speech", speaker: "林晓青", text: content, tone: "orange" });
+      addEvent({ type: "speech", speaker: userSpeakerName, text: content, tone: "orange" });
       setPublicMessage("");
+      refreshBackendPhase();
     } catch (error) {
       showFeedback(`后端保存公开发言失败：${error instanceof Error ? error.message : String(error)}`);
     }
@@ -520,7 +813,24 @@ function GamePage() {
     }
   };
 
+  const enterVoteStage = async () => {
+    if (!sessionId) return showFeedback("无法进入投票：尚未创建后端游戏会话。");
+    try {
+      const info = await getGamePhase(sessionId);
+      if (!info?.can_advance) {
+        setBackendCanAdvance(false);
+        return showFeedback("尚未满足进入推理投票的后端条件，请先完成本轮全部发言。");
+      }
+      await advanceGamePhase(sessionId);
+      setBackendCanAdvance(true);
+      setPhaseIndex(5);
+    } catch (error) {
+      showFeedback(`进入推理投票失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
   const playerStatus = (playerId: string) => {
+    if (phase.id === "role-selection") return "";
     if (currentSpeaker === playerId) return "正在发言";
     if (queue.includes(playerId)) return "等待发言";
     return "思考中";
@@ -560,6 +870,13 @@ function GamePage() {
     showFeedback("高亮文段已删除。");
   };
 
+  const toggleScriptHighlight = (highlightId: string) => {
+    setScriptHighlights((items) => items.filter((item) => item.id !== highlightId));
+    setSelectedScriptText("");
+    window.getSelection()?.removeAllRanges();
+    showFeedback("已取消该高亮文段。");
+  };
+
   const discussionSource = (eventId: number | null) => {
     const event = events.find((item) => item.id === eventId);
     if (!event || (event.type !== "speech" && event.type !== "evidence")) return null;
@@ -576,7 +893,7 @@ function GamePage() {
 
   const openPointDialog = (eventId: number) => {
     setSelectedDiscussionEventId(eventId);
-    setPointTargetId("chen");
+    setPointTargetId(players.find((player) => player.id !== "user" && player.id !== "dm")?.id || "");
     setPointReason("");
     setDialog("point");
   };
@@ -597,7 +914,7 @@ function GamePage() {
     ));
     addEvent({
       type: "accusation",
-      actor: "林晓青",
+      actor: userSpeakerName,
       target: `${target.role} · ${target.name}`,
       sourceTitle: discussionSourceTitle(source),
       reason: pointReason.trim() || undefined,
@@ -608,7 +925,7 @@ function GamePage() {
 
   const openInquiryDialog = (eventId: number) => {
     setSelectedDiscussionEventId(eventId);
-    setInquiryTargetId("crow");
+    setInquiryTargetId(players.find((player) => player.id !== "user" && player.id !== "dm")?.id || "");
     setInquiryQuestion("");
     setDialog("inquiry");
   };
@@ -638,7 +955,7 @@ function GamePage() {
     setInquiryRecords((items) => [...items, record]);
     addEvent({
       type: "inquiry",
-      asker: "林晓青",
+      asker: userSpeakerName,
       target: record.targetName,
       sourceTitle,
       question: record.question,
@@ -652,10 +969,10 @@ function GamePage() {
 
   const selectedDiscussionSource = discussionSource(selectedDiscussionEventId);
   const selectedDiscussionSpeaker = selectedDiscussionSource
-    ? GAME_PLAYERS.find((player) =>
-      selectedDiscussionSource.type === "speech"
-        ? selectedDiscussionSource.speaker.includes(player.name)
-        : selectedDiscussionSource.speaker.includes(player.name),
+    ? players.find((player) =>
+      [player.role, player.name, `${player.role} Agent`, `${player.name} Agent`].some((label) =>
+        selectedDiscussionSource.speaker.includes(label),
+      ),
     )
     : undefined;
   const selectedDiscussionSuspect = selectedDiscussionSource?.suspectId
@@ -680,7 +997,22 @@ function GamePage() {
       if (start < 0) return;
       if (start > cursor) parts.push(content.slice(cursor, start));
       parts.push(
-        <mark key={highlight.id} className="game-script-highlight">
+        <mark
+          key={highlight.id}
+          className="game-script-highlight"
+          role="button"
+          tabIndex={0}
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleScriptHighlight(highlight.id);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              toggleScriptHighlight(highlight.id);
+            }
+          }}
+        >
           {highlight.text}
         </mark>,
       );
@@ -702,8 +1034,10 @@ function GamePage() {
         >
           <Group align="flex-start" wrap="nowrap">
             {(() => {
-              const speakerPlayer = GAME_PLAYERS.find((p) => p.name === event.speaker || `${p.name} Agent` === event.speaker);
-              const speakerPortrait = speakerPlayer ? characterPortraits[speakerPlayer.role] : undefined;
+              const speakerPlayer = players.find((p) =>
+                [p.role, p.name, `${p.role} Agent`, `${p.name} Agent`].includes(event.speaker),
+              );
+              const speakerPortrait = speakerPlayer ? getRolePortrait(speakerPlayer.role) : getRolePortrait(event.speaker);
               return speakerPortrait ? (
                 <Avatar src={speakerPortrait} size="sm" imageProps={{ style: { objectPosition: "top" } }} />
               ) : (
@@ -793,9 +1127,11 @@ function GamePage() {
         <Stack gap="md">
           <Group justify="space-between"><Box><Title order={3}>选择你的角色</Title><Text c="dimmed">查看公开身份与标签，确认后进入剧本阅读。</Text></Box><Badge>{roleConfirmed ? "已确认" : "待确认"}</Badge></Group>
           <AgentCastingPanel
-            roles={ROLE_OPTIONS}
+            roles={roleOptions}
             selectedPlayerRoleId={selectedRole}
+            seatAssignments={castingSeats}
             onPlayerRoleChange={setSelectedRole}
+            onSeatAssignmentsChange={setCastingSeats}
           />
           <Button
             radius="xl"
@@ -885,7 +1221,7 @@ function GamePage() {
               <Text fw={700}>选择嫌疑人</Text>
               <Radio.Group value={voteSuspect} onChange={setVoteSuspect}>
                 <Box className="game-suspect-grid" mt="xs">
-                  {GAME_PLAYERS.filter((player) => !player.agent && player.id !== "user").map((player) => (
+                  {players.filter((player) => player.id !== "user" && player.id !== "dm").map((player) => (
                     <Paper
                       key={player.id}
                       component="label"
@@ -894,8 +1230,8 @@ function GamePage() {
                       className={voteSuspect === player.id ? "game-suspect-option is-selected" : "game-suspect-option"}
                     >
                       <Group wrap="nowrap">
-                        {characterPortraits[player.role] ? (
-                          <Avatar src={characterPortraits[player.role]} size={40} radius="xl" imageProps={{ style: { objectPosition: "top" } }} />
+                        {getRolePortrait(player.role) ? (
+                          <Avatar src={getRolePortrait(player.role)} size={40} radius="xl" imageProps={{ style: { objectPosition: "top" } }} />
                         ) : (
                           <Avatar color={player.color}>{player.role.slice(0, 1)}</Avatar>
                         )}
@@ -944,7 +1280,7 @@ function GamePage() {
           <Stack gap="md">
             <Box>
               <Text className="monospace-label" size="xs" c="dimmed">my private script</Text>
-              <Title order={3}>周野的剧本</Title>
+              <Title order={3}>{userSpeakerName}的剧本</Title>
               <Text size="sm" c="dimmed">可随时打开完整剧本，并管理已经保存的高亮文段。</Text>
             </Box>
             <Button
@@ -1068,11 +1404,12 @@ function GamePage() {
         </Tabs.Panel>
         <Tabs.Panel value="chat" pt="md">
           <Stack gap="md">
+            {privateInvitePlayer && (
             <Paper p="sm" radius="lg" className="game-private-event">
               <Group justify="space-between" align="flex-start">
                 <Box>
                   <Group gap={6}>
-                    <Text fw={900}>白鸦 Agent 申请私聊</Text>
+                    <Text fw={900}>{privateInvitePlayer.role} · 玩家：{privateInvitePlayer.name} 申请私聊</Text>
                     <Badge
                       size="xs"
                       color={privateInviteStatus === "未处理" || privateInviteStatus === "稍后处理" ? "orange" : privateInviteStatus === "已接受" ? "teal" : "gray"}
@@ -1085,12 +1422,13 @@ function GamePage() {
               </Group>
               {(privateInviteStatus === "未处理" || privateInviteStatus === "稍后处理") && (
                 <Group gap={6} mt="sm">
-                  <Button size="compact-xs" onClick={() => { setPrivateInviteStatus("已接受"); acceptPrivateInvite("crow"); }}>允许</Button>
+                  <Button size="compact-xs" onClick={() => { setPrivateInviteStatus("已接受"); acceptPrivateInvite(privateInvitePlayer.id); }}>允许</Button>
                   <Button size="compact-xs" variant="light" onClick={() => setPrivateInviteStatus("稍后处理")}>稍后</Button>
                   <Button size="compact-xs" variant="subtle" color="red" onClick={() => setPrivateInviteStatus("已拒绝")}>拒绝</Button>
                 </Group>
               )}
             </Paper>
+            )}
 
             <Box>
               <Group
@@ -1142,7 +1480,7 @@ function GamePage() {
         <Button radius="xl" variant="light" onClick={() => setDialog("private")}>发起私聊</Button>
         <Button radius="xl" variant="light" disabled={!isUserSpeaking} onClick={() => setDialog("force")}>指定 Agent 回答</Button>
         <Button radius="xl" variant="light" disabled={!isUserSpeaking} onClick={() => setDialog("evidence")}>出示证物</Button>
-        <Button radius="xl" variant="subtle" color="orange" disabled={Boolean(forcedAnswer)} onClick={() => goToPhase(5)}>进入推理投票</Button>
+        <Button radius="xl" variant="subtle" color="orange" disabled={Boolean(forcedAnswer) || !backendCanAdvance} onClick={enterVoteStage}>进入推理投票</Button>
         <TextInput value={publicMessage} onChange={(event) => setPublicMessage(event.currentTarget.value)} placeholder={isUserSpeaking ? "输入当前公共发言…" : "轮到你发言后可输入内容"} disabled={!isUserSpeaking} className="game-message-input" radius="xl" />
         <ActionIcon size="lg" radius="xl" onClick={sendPublicMessage} disabled={!isUserSpeaking}><IconSend size={17} /></ActionIcon>
       </Group>
@@ -1181,7 +1519,7 @@ function GamePage() {
                   <Text fw={800}>{current?.role || "暂无"} → {playerById(queue.find((item) => item !== currentSpeaker) || null)?.role || "等待申请"}</Text>
                 </Box>
               </Group>
-              <Group gap="xs"><Badge size="lg" color="orange" leftSection={<IconClock size={13} />}>{formatTime(speakerSeconds)}</Badge><Button size="xs" variant="light" onClick={() => setDialog("rules")}>游戏规则</Button><Tooltip label={fullscreen ? "退出全屏" : "全屏"}><ActionIcon size="lg" onClick={toggleFullscreen}>{fullscreen ? <IconX size={18} /> : <IconMaximize size={18} />}</ActionIcon></Tooltip><ActionIcon size="lg" variant={settingsOpen ? "filled" : "light"} onClick={() => setSettingsOpen((value) => !value)}><IconSettings size={18} /></ActionIcon><Button size="xs" color="red" variant="subtle" onClick={() => navigate("/games")}>退出</Button></Group>
+              <Group gap="xs"><Badge size="lg" color="orange" leftSection={<IconClock size={13} />}>{formatTime(speakerSeconds)}</Badge><Button size="xs" variant="light" onClick={() => setDialog("rules")}>游戏规则</Button><Tooltip label={fullscreen ? "退出全屏" : "全屏"}><ActionIcon size="lg" onClick={toggleFullscreen}>{fullscreen ? <IconX size={18} /> : <IconMaximize size={18} />}</ActionIcon></Tooltip><ActionIcon size="lg" variant={settingsOpen ? "filled" : "light"} onClick={() => setSettingsOpen((value) => !value)}><IconSettings size={18} /></ActionIcon><Button size="xs" color="red" variant="subtle" onClick={() => navigate("/games")}>退出游戏</Button></Group>
             </Group>
             <Box className="game-phase-track">{GAME_PHASES.map((item, index) => <button key={item.id} disabled={index === 0 && roleConfirmed} className={`${index < phaseIndex ? "game-phase-step is-complete" : index === phaseIndex ? "game-phase-step is-active" : "game-phase-step"}${index === 0 && roleConfirmed ? " is-locked" : ""}`} onClick={() => goToPhase(index)}><span>{index < phaseIndex ? "✓" : index + 1}</span><Text size="xs">{item.shortLabel}</Text></button>)}</Box>
           </header>
@@ -1204,7 +1542,25 @@ function GamePage() {
               <Group justify="space-between" mb="md"><Group gap="xs"><IconUsers size={18} /><Text fw={900}>玩家与 Agent</Text></Group><Badge color="teal">6 在线</Badge></Group>
               <ScrollArea className="game-panel-scroll" offsetScrollbars>
                 <Stack gap="xs">
-                  {GAME_PLAYERS.filter((player) => player.id !== "dm").map((player) => {
+                  {phase.id === "role-selection" && castingSidebarEntries.map((entry, index) => (
+                    <Paper key={entry.id} p="sm" radius="lg" className="game-player">
+                      <Group wrap="nowrap">
+                        <Box className="game-avatar-wrap">
+                          {getRolePortrait(entry.role) ? <Avatar src={getRolePortrait(entry.role)} size={40} radius="xl" imageProps={{ style: { objectPosition: "top" } }} /> : <Avatar color={entry.color}>{entry.role.slice(0, 1)}</Avatar>}
+                          <Box className="game-online-dot" />
+                        </Box>
+                        <Box style={{ flex: 1, minWidth: 0 }}>
+                          <Group gap={5}>
+                            <Text fw={900} truncate>{entry.role}</Text>
+                            {entry.assignment === HUMAN_PLAYER && <Badge size="xs" color="orange" variant="filled">我</Badge>}
+                          </Group>
+                          <Text size="xs" c="dimmed" truncate>{entry.occupant}</Text>
+                        </Box>
+                        <Badge size="xs" variant="light">{index + 1} 号位</Badge>
+                      </Group>
+                    </Paper>
+                  ))}
+                  {phase.id !== "role-selection" && players.filter((player) => player.id !== "dm").map((player) => {
                     const status = playerStatus(player.id);
                     const isSelf = player.id === "user";
                     const classNames = [
@@ -1216,7 +1572,7 @@ function GamePage() {
                     return (
                       <Paper key={player.id} p="sm" radius="lg" className={classNames} onClick={() => setSelectedPlayerId(player.id)} style={{ cursor: "pointer" }}>
                         <Group wrap="nowrap">
-                          <Box className="game-avatar-wrap">{characterPortraits[player.role] ? <Avatar src={characterPortraits[player.role]} size={40} radius="xl" imageProps={{ style: { objectPosition: "top" } }} /> : <Avatar color={player.color}>{player.role.slice(0, 1)}</Avatar>}<Box className="game-online-dot" /></Box>
+                          <Box className="game-avatar-wrap">{getRolePortrait(player.role) ? <Avatar src={getRolePortrait(player.role)} size={40} radius="xl" imageProps={{ style: { objectPosition: "top" } }} /> : <Avatar color={player.color}>{player.role.slice(0, 1)}</Avatar>}<Box className="game-online-dot" /></Box>
                           <Box style={{ flex: 1, minWidth: 0 }}>
                             <Group gap={5}>
                               <Text fw={900} truncate>{player.role}</Text>
@@ -1224,7 +1580,7 @@ function GamePage() {
                             </Group>
                             <Text size="xs" c="dimmed" truncate>玩家：{player.name}</Text>
                           </Box>
-                          <Badge size="xs" color={status === "正在发言" ? "orange" : status === "思考中" ? "blue" : "gray"} variant="dot">{status}</Badge>
+                          {status && <Badge size="xs" color={status === "正在发言" ? "orange" : status === "思考中" ? "blue" : "gray"} variant="dot">{status}</Badge>}
                         </Group>
                       </Paper>
                     );
@@ -1242,8 +1598,8 @@ function GamePage() {
         </Paper>
       </Box>
 
-      <Modal opened={dialog === "force"} onClose={() => setDialog(null)} title="指定 Agent 回答" centered><Stack><Select label="选择 Agent" value={targetId} onChange={(value) => setTargetId(value || "crow")} data={agents.map((agent) => ({ value: agent.id, label: `${agent.name} · ${agent.role}` }))} /><Textarea label="需要回答的问题" value={question} onChange={(event) => setQuestion(event.currentTarget.value)} minRows={4} /><Button onClick={confirmForcedAnswer}>确认指定</Button></Stack></Modal>
-      <Modal opened={dialog === "evidence"} onClose={() => setDialog(null)} title="出示证物" centered><Stack><Select label="选择证物" value={selectedEvidenceId} onChange={(value) => setSelectedEvidenceId(value || evidence[0]?.id)} data={evidence.map((item) => ({ value: item.id, label: item.name }))} /><Textarea label="出示理由" placeholder="说明这项证据支持或反驳了什么观点" value={evidenceReason} onChange={(event) => setEvidenceReason(event.currentTarget.value)} minRows={3} /><Radio.Group label="公开范围" value={evidenceVisibility} onChange={setEvidenceVisibility}><Stack mt="xs"><Radio value="所有人" label="公开给所有人" /><Radio value="指定角色" label="只分享给指定角色" /></Stack></Radio.Group>{evidenceVisibility === "指定角色" && <Select label="指定角色" value={targetId} onChange={(value) => setTargetId(value || "chen")} data={GAME_PLAYERS.filter((player) => player.id !== "user").map((player) => ({ value: player.id, label: player.name }))} />}<Button onClick={showEvidence}>确认出示</Button></Stack></Modal>
+      <Modal opened={dialog === "force"} onClose={() => setDialog(null)} title="指定 Agent 回答" centered><Stack><Select label="选择 Agent" value={targetId} onChange={(value) => setTargetId(value || "")} data={agents.map((agent) => ({ value: agent.id, label: `${agent.name} · ${agent.role}` }))} /><Textarea label="需要回答的问题" value={question} onChange={(event) => setQuestion(event.currentTarget.value)} minRows={4} /><Button onClick={confirmForcedAnswer}>确认指定</Button></Stack></Modal>
+      <Modal opened={dialog === "evidence"} onClose={() => setDialog(null)} title="出示证物" centered><Stack><Select label="选择证物" value={selectedEvidenceId} onChange={(value) => setSelectedEvidenceId(value || evidence[0]?.id)} data={evidence.map((item) => ({ value: item.id, label: item.name }))} /><Textarea label="出示理由" placeholder="说明这项证据支持或反驳了什么观点" value={evidenceReason} onChange={(event) => setEvidenceReason(event.currentTarget.value)} minRows={3} /><Radio.Group label="公开范围" value={evidenceVisibility} onChange={setEvidenceVisibility}><Stack mt="xs"><Radio value="所有人" label="公开给所有人" /><Radio value="指定角色" label="只分享给指定角色" /></Stack></Radio.Group>{evidenceVisibility === "指定角色" && <Select label="指定角色" value={targetId} onChange={(value) => setTargetId(value || "")} data={participantOptions} />}<Button onClick={showEvidence}>确认出示</Button></Stack></Modal>
       <Modal
         opened={dialog === "evidence-detail"}
         onClose={() => setDialog(null)}
@@ -1353,11 +1709,8 @@ function GamePage() {
           <Select
             label="你怀疑谁"
             value={pointTargetId}
-            onChange={(value) => setPointTargetId(value || "chen")}
-            data={GAME_PLAYERS.filter((player) => player.id !== "user" && player.id !== "dm").map((player) => ({
-              value: player.id,
-              label: `${player.role} · ${player.name}`,
-            }))}
+            onChange={(value) => setPointTargetId(value || "")}
+            data={participantOptions}
           />
           <Textarea
             label="怀疑理由（可选）"
@@ -1376,11 +1729,8 @@ function GamePage() {
           <Select
             label="质询对象"
             value={inquiryTargetId}
-            onChange={(value) => setInquiryTargetId(value || "crow")}
-            data={GAME_PLAYERS.filter((player) => player.id !== "user" && player.id !== "dm").map((player) => ({
-              value: player.id,
-              label: `${player.role} · ${player.name}${player.agent ? " · AI" : " · 真人"}`,
-            }))}
+            onChange={(value) => setInquiryTargetId(value || "")}
+            data={participantOptions}
           />
           <Textarea
             label="质询问题"
@@ -1392,7 +1742,7 @@ function GamePage() {
           <Button onClick={confirmInquiry}>发起质询并保存记录</Button>
         </Stack>
       </Modal>
-      <Modal opened={dialog === "private"} onClose={() => setDialog(null)} title="发起或接受私聊" centered><Stack><Select label="私聊对象" value={targetId} onChange={(value) => setTargetId(value || "crow")} data={GAME_PLAYERS.filter((player) => player.id !== "user" && player.id !== "dm").map((player) => ({ value: player.id, label: `${player.role} · 玩家：${player.name}` }))} /><Text size="sm" c="dimmed">私聊建立后即可直接对话，不需要额外设置 Agent 发言权限；私聊内容和证物不会自动公开。</Text><Button onClick={() => acceptPrivateInvite()}>建立私聊</Button></Stack></Modal>
+      <Modal opened={dialog === "private"} onClose={() => setDialog(null)} title="发起或接受私聊" centered><Stack><Select label="私聊对象" value={targetId} onChange={(value) => setTargetId(value || "")} data={participantOptions} /><Text size="sm" c="dimmed">私聊建立后即可直接对话，不需要额外设置 Agent 发言权限；私聊内容和证物不会自动公开。</Text><Button onClick={() => acceptPrivateInvite()}>建立私聊</Button></Stack></Modal>
       <Modal opened={dialog === "rules"} onClose={() => setDialog(null)} title="游戏规则" centered size="lg"><Stack><Text>公共讨论采用单一发言权，普通发言按申请顺序进行。</Text><Text>被指定回答的 Agent 必须成为下一位发言者，回答结束后恢复原队列。</Text><Text>私聊与公共讨论独立运行，私聊内容和证物仅参与者可见。</Text><Text>进入投票阶段后停止新的发言、私聊和证物出示。</Text></Stack></Modal>
       <Modal
         opened={dialog === "script"}
@@ -1400,7 +1750,7 @@ function GamePage() {
           setDialog(null);
           setSelectedScriptText("");
         }}
-        title="我的剧本 · 周野"
+        title={`我的剧本 · ${userSpeakerName}`}
         centered
         size="xl"
         scrollAreaComponent={ScrollArea.Autosize}
@@ -1471,9 +1821,9 @@ function GamePage() {
           }}
         >
           <Box className="game-intro-portrait" aria-hidden="true">
-            {characterPortraits[introSpotlight.role] ? (
+            {getRolePortrait(introSpotlight.role) ? (
               <img
-                src={characterPortraits[introSpotlight.role]}
+                src={getRolePortrait(introSpotlight.role)}
                 alt={introSpotlight.role}
                 style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", objectPosition: "top" }}
               />
@@ -1486,8 +1836,8 @@ function GamePage() {
           </Box>
           <Paper className="game-intro-speech" radius="xl" p="lg">
             <Group gap="sm">
-              {characterPortraits[introSpotlight.role] ? (
-                <Avatar src={characterPortraits[introSpotlight.role]} size={48} radius="xl" imageProps={{ style: { objectPosition: "top" } }} />
+              {getRolePortrait(introSpotlight.role) ? (
+                <Avatar src={getRolePortrait(introSpotlight.role)} size={48} radius="xl" imageProps={{ style: { objectPosition: "top" } }} />
               ) : (
                 <Avatar color={introSpotlight.color}>{introSpotlight.role.slice(0, 1)}</Avatar>
               )}
@@ -1496,7 +1846,7 @@ function GamePage() {
                 <Text size="sm" c="dimmed">{introSpotlight.name} · {introSpotlight.agent ? "AI 玩家" : "真人玩家"}</Text>
               </Box>
             </Group>
-            <Text fz="lg" lh={1.8} mt="md">“{INTRO_LINES[introSpotlight.id]}”</Text>
+            <Text fz="lg" lh={1.8} mt="md">“{resolveIntroLine(introSpotlight)}”</Text>
             <Text size="xs" c="dimmed" ta="center" mt="md">点击任意位置继续</Text>
           </Paper>
         </Box>

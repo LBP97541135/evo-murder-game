@@ -12,14 +12,10 @@ import {
   Title,
 } from "@mantine/core";
 
-// ============================
-// 角色立绘
-// ============================
-
 const characterPortraits: Record<string, string> = {
   "周野": new URL("../Character/周野.png", import.meta.url).href,
   "顾沉": new URL("../Character/顾沉.png", import.meta.url).href,
-  "沈禾": new URL("../Character/沈禾.png", import.meta.url).href,
+  "沈砚": new URL("../Character/沈禾.png", import.meta.url).href,
   "周岚": new URL("../Character/周岚.png", import.meta.url).href,
   "秦野": new URL("../Character/秦野.png", import.meta.url).href,
 };
@@ -117,68 +113,28 @@ const CASTING_TEMPLATES: CastingTemplate[] = [
 ];
 
 const AVATAR_COLORS = ["red", "orange", "grape", "blue", "cyan", "teal", "pink", "yellow"];
-const HUMAN_PLAYER = "human-player";
-
-function emptySeats(count: number) {
-  return Array.from({ length: count }, (_, index) => `seat-${index}`);
-}
+export const HUMAN_PLAYER = "human-player";
 
 type AgentCastingPanelProps = {
   roles: CastingRole[];
   selectedPlayerRoleId: string;
+  seatAssignments: string[];
   onPlayerRoleChange: (roleId: string) => void;
+  onSeatAssignmentsChange: (seatAssignments: string[]) => void;
 };
 
 export function AgentCastingPanel({
   roles,
   selectedPlayerRoleId,
+  seatAssignments,
   onPlayerRoleChange,
+  onSeatAssignmentsChange,
 }: AgentCastingPanelProps) {
-  const playerCount = roles.length;
-  const [ensembleSeats, setEnsembleSeats] = React.useState<string[]>(() => emptySeats(playerCount));
   const [selectedSeat, setSelectedSeat] = React.useState<number | null>(null);
   const [agentPickerOpen, setAgentPickerOpen] = React.useState(false);
+  const playerCount = roles.length;
 
-  const filteredTemplates = CASTING_TEMPLATES.filter(
-    (template) => template.playerCount === playerCount,
-  );
-
-  React.useEffect(() => {
-    setEnsembleSeats(emptySeats(playerCount));
-  }, [playerCount]);
-
-  const applyTemplate = (template: CastingTemplate) => {
-    setEnsembleSeats([...template.agentKeys]);
-    onPlayerRoleChange("");
-  };
-
-  const handleAgentPick = (agentKey: string) => {
-    if (selectedSeat !== null) {
-      if (roles[selectedSeat]?.id === selectedPlayerRoleId) {
-        onPlayerRoleChange("");
-      }
-      setEnsembleSeats((current) => {
-        const next = [...current];
-        next[selectedSeat] = agentKey;
-        return next;
-      });
-    }
-    setAgentPickerOpen(false);
-    setSelectedSeat(null);
-  };
-
-  const handlePlayMyself = () => {
-    if (selectedSeat === null) return;
-    setEnsembleSeats((current) =>
-      current.map((seat, index) => {
-        if (index === selectedSeat) return HUMAN_PLAYER;
-        return seat === HUMAN_PLAYER ? `seat-${index}` : seat;
-      }),
-    );
-    onPlayerRoleChange(roles[selectedSeat]?.id || "");
-    setAgentPickerOpen(false);
-    setSelectedSeat(null);
-  };
+  const filteredTemplates = CASTING_TEMPLATES.filter((template) => template.playerCount === playerCount);
 
   const getSeatPosition = (index: number, total: number) => {
     const angle = -90 + (360 / total) * index;
@@ -189,69 +145,45 @@ export function AgentCastingPanel({
     };
   };
 
+  const applyTemplate = (template: CastingTemplate) => {
+    onSeatAssignmentsChange([...template.agentKeys]);
+    onPlayerRoleChange("");
+  };
+
+  const handleAgentPick = (agentKey: string) => {
+    if (selectedSeat === null) return;
+    if (roles[selectedSeat]?.id === selectedPlayerRoleId) {
+      onPlayerRoleChange("");
+    }
+    const next = [...seatAssignments];
+    next[selectedSeat] = agentKey;
+    onSeatAssignmentsChange(next);
+    setAgentPickerOpen(false);
+    setSelectedSeat(null);
+  };
+
+  const handlePlayMyself = () => {
+    if (selectedSeat === null) return;
+    onSeatAssignmentsChange(
+      seatAssignments.map((seat, index) => {
+        if (index === selectedSeat) return HUMAN_PLAYER;
+        return seat === HUMAN_PLAYER ? `seat-${index}` : seat;
+      }),
+    );
+    onPlayerRoleChange(roles[selectedSeat]?.id || "");
+    setAgentPickerOpen(false);
+    setSelectedSeat(null);
+  };
+
   return (
     <Stack gap="lg">
-      <Paper radius="xl" p="xl" className="industrial-card">
-        <Stack gap="lg" align="center">
-          <Group justify="space-between" w="100%" wrap="wrap">
-            <Box>
-              <Text className="monospace-label" size="xs" c="dimmed">role casting table</Text>
-              <Title order={3}>剧本角色圆桌</Title>
-            </Box>
-            <Badge color="red" variant="light">{playerCount} 个角色席位</Badge>
-          </Group>
-          <Box className="round-table">
-            <Box className="round-table__surface" />
-            {ensembleSeats.map((agentKey, index) => {
-              const agent = CASTING_AGENTS.find((item) => item.key === agentKey);
-              const isHuman = agentKey === HUMAN_PLAYER;
-              const position = getSeatPosition(index, playerCount);
-              const roleName = roles[index]?.role || `角色 ${index + 1}`;
-              return (
-                <Box
-                  key={`${index}-${agentKey}`}
-                  className="round-table__seat"
-                  style={{ left: position.left, top: position.top }}
-                  onClick={() => {
-                    setSelectedSeat(index);
-                    setAgentPickerOpen(true);
-                  }}
-                >
-                  {(() => {
-                    const rolePortrait = characterPortraits[roleName];
-                    const showPortrait = rolePortrait && (!agent || isHuman);
-                    return showPortrait ? (
-                      <Avatar src={rolePortrait} size={52} radius="xl" className="round-table__role" imageProps={{ style: { objectPosition: "top" } }} />
-                    ) : (
-                      <Avatar
-                        size={52}
-                        radius="xl"
-                        color={isHuman ? "orange" : agent ? AVATAR_COLORS[agentKey.charCodeAt(0) % AVATAR_COLORS.length] : "gray"}
-                        className="round-table__role"
-                      >
-                        {roleName}
-                      </Avatar>
-                    );
-                  })()}
-                  <Text size="xs" ta="center" mt={4} lineClamp={1} c={isHuman ? "orange.3" : undefined}>
-                    {isHuman ? "我 · 真人玩家" : agent ? agent.name : roleName}
-                  </Text>
-                </Box>
-              );
-            })}
-          </Box>
-          <Text size="sm" c="dimmed">点击 Agent 空位或已有座位，可选择和更换 Agent。</Text>
-        </Stack>
-      </Paper>
-
       <Paper radius="xl" p="lg" className="industrial-card">
         <Group justify="space-between" mb="md">
           <Box>
             <Text className="monospace-label" size="xs" c="dimmed">ensemble templates</Text>
-            <Title order={3}>推荐搭配</Title>  
+            <Title order={3}>推荐搭配</Title>
             <Text size="xs" c="red.2" mt="sm">点击卡片一键填充圆桌</Text>
           </Box>
-         
         </Group>
         <Box className="game-casting-template-grid">
           {filteredTemplates.map((template) => (
@@ -270,7 +202,6 @@ export function AgentCastingPanel({
                 </Badge>
               </Group>
               <Text size="sm" c="dimmed" lh={1.6}>{template.description}</Text>
-             
               <Group gap={4} mt="md">
                 {template.agentKeys.map((key) => {
                   const agent = CASTING_AGENTS.find((item) => item.key === key);
@@ -284,6 +215,57 @@ export function AgentCastingPanel({
             </Card>
           ))}
         </Box>
+      </Paper>
+
+      <Paper radius="xl" p="xl" className="industrial-card">
+        <Stack gap="lg" align="center">
+          <Group justify="space-between" w="100%" wrap="wrap">
+            <Box>
+              <Text className="monospace-label" size="xs" c="dimmed">role casting table</Text>
+              <Title order={3}>剧本角色圆桌</Title>
+            </Box>
+            <Badge color="red" variant="light">{playerCount} 个角色席位</Badge>
+          </Group>
+          <Box className="round-table">
+            <Box className="round-table__surface" />
+            {seatAssignments.map((agentKey, index) => {
+              const agent = CASTING_AGENTS.find((item) => item.key === agentKey);
+              const isHuman = agentKey === HUMAN_PLAYER;
+              const position = getSeatPosition(index, playerCount);
+              const roleName = roles[index]?.role || `角色 ${index + 1}`;
+              const rolePortrait = characterPortraits[roleName];
+              const showPortrait = Boolean(rolePortrait) && (!agent || isHuman);
+              return (
+                <Box
+                  key={`${index}-${agentKey}`}
+                  className="round-table__seat"
+                  style={{ left: position.left, top: position.top }}
+                  onClick={() => {
+                    setSelectedSeat(index);
+                    setAgentPickerOpen(true);
+                  }}
+                >
+                  {showPortrait ? (
+                    <Avatar src={rolePortrait} size={52} radius="xl" className="round-table__role" imageProps={{ style: { objectPosition: "top" } }} />
+                  ) : (
+                    <Avatar
+                      size={52}
+                      radius="xl"
+                      color={isHuman ? "orange" : agent ? AVATAR_COLORS[agentKey.charCodeAt(0) % AVATAR_COLORS.length] : "gray"}
+                      className="round-table__role"
+                    >
+                      {roleName}
+                    </Avatar>
+                  )}
+                  <Text size="xs" ta="center" mt={4} lineClamp={1} c={isHuman ? "orange.3" : undefined}>
+                    {isHuman ? "我 · 真人玩家" : agent ? agent.name : roleName}
+                  </Text>
+                </Box>
+              );
+            })}
+          </Box>
+          <Text size="sm" c="dimmed">点击圆桌席位即可选择真人玩家或陪玩 Agent。</Text>
+        </Stack>
       </Paper>
 
       <Modal
@@ -327,7 +309,7 @@ export function AgentCastingPanel({
             <Stack gap="sm">
               <Box>
                 <Text className="monospace-label" size="xs" c="dimmed">casting options</Text>
-                <Title order={3}>选择陪玩 Agent</Title>
+                <Title order={3}>选择扮演者</Title>
               </Box>
               <Card
                 radius="lg"

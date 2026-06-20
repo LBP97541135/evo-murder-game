@@ -1,11 +1,17 @@
 import React, { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-/* eslint-disable @typescript-eslint/no-var-requires */
-const titleImg  = require("../video/暗夜剧场字体.png") as string;
-const ctaImg    = require("../video/触碰以入局字体.png") as string;
-const videoSrc  = require("../video/开屏幕动画.mp4") as string;
-const posterImg = require("../video/首帧画面.png") as string;
+<<<<<<< HEAD
+const titleImg = new URL("../video/暗夜剧场字体.png", import.meta.url).href;
+const ctaImg = new URL("../video/触碰以入局字体.png", import.meta.url).href;
+const videoSrc = new URL("../video/开屏幕动画.mp4", import.meta.url).href;
+const posterImg = new URL("../video/首帧画面.png", import.meta.url).href;
+=======
+import titleImg  from "../video/暗夜剧场字体.png";
+import ctaImg    from "../video/触碰以入局字体.png";
+import videoSrc  from "../video/开屏幕动画.mp4";
+import posterImg from "../video/首帧画面.png";
+>>>>>>> 4c64625f1d6eed53c2a94e288ce49b13dc12dc6c
 
 type Phase = "idle" | "playing" | "ended";
 
@@ -13,11 +19,18 @@ export function SplashPage() {
   const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [phase, setPhase] = useState<Phase>("idle");
+  const [ctaVisible, setCtaVisible] = useState(false);
 
   const startVideo = () => {
     if (phase !== "idle") return;
     videoRef.current?.play();
     setPhase("playing");
+  };
+
+  const handleTimeUpdate = () => {
+    if (!ctaVisible && videoRef.current && videoRef.current.currentTime >= 14) {
+      setCtaVisible(true);
+    }
   };
 
   return (
@@ -37,6 +50,7 @@ export function SplashPage() {
         src={videoSrc}
         poster={posterImg}
         playsInline
+        onTimeUpdate={handleTimeUpdate}
         onEnded={() => setPhase("ended")}
         style={{
           position: "absolute",
@@ -68,14 +82,14 @@ export function SplashPage() {
         </div>
       )}
 
-      {/* 触碰以入局字体：水平居中、垂直居中偏上，视频结束后从下滑入 */}
-      {phase === "ended" && (
+      {/* 触碰以入局字体：水平居中、垂直居中偏上，第14秒开始滑入 */}
+      {ctaVisible && (
         <div
           style={{
             position: "absolute",
-            top: "38%",
+            top: "50%",
             left: "50%",
-            transform: "translateX(-50%)",
+            transform: "translate(-50%, -50%)",
           }}
         >
           <img

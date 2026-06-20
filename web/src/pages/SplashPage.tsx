@@ -1,11 +1,10 @@
 import React, { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-/* eslint-disable @typescript-eslint/no-var-requires */
-const titleImg  = require("../video/暗夜剧场字体.png") as string;
-const ctaImg    = require("../video/触碰以入局字体.png") as string;
-const videoSrc  = require("../video/开屏幕动画.mp4") as string;
-const posterImg = require("../video/首帧画面.png") as string;
+import titleImg  from "../video/暗夜剧场字体.png";
+import ctaImg    from "../video/触碰以入局字体.png";
+import videoSrc  from "../video/开屏幕动画.mp4";
+import posterImg from "../video/首帧画面.png";
 
 type Phase = "idle" | "playing" | "ended";
 
@@ -83,7 +82,7 @@ export function SplashPage() {
             position: "absolute",
             top: "50%",
             left: "50%",
-            transform: "translateX(-50%)",
+            transform: "translate(-50%, -50%)",
           }}
         >
           <img

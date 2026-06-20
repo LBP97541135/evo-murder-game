@@ -58,7 +58,11 @@ import {
   presentEvidence,
   saveConversation,
   submitGameVote,
+  invokeAI,
+  invokeAIStream,
+  type InvocationRequest,
 } from "../api/invoke";
+import type { Actor, SafeActor, LLMMessage } from "../types";
 import { AgentCastingPanel } from "../components/AgentCastingPanel";
 import { StudioShell } from "./StudioShell";
 
@@ -125,6 +129,15 @@ type InquiryRecord = {
   targetName: string;
   question: string;
   answer: string;
+};
+
+type StreamingState = {
+  active: boolean;
+  agentKey: string;
+  agentName: string;
+  partial: string;
+  phase: "intro" | "speech" | "forced" | "inquiry";
+  resolveId?: number; // event id to append text to
 };
 
 type ScriptHighlight = {
@@ -223,6 +236,7 @@ function GamePage() {
   const [inquiryRecords, setInquiryRecords] = React.useState<InquiryRecord[]>([]);
   const [privateInviteStatus, setPrivateInviteStatus] = React.useState<"未处理" | "稍后处理" | "已接受" | "已拒绝">("未处理");
   const [chatHistoryOpen, setChatHistoryOpen] = React.useState(false);
+  const [streaming, setStreaming] = React.useState<StreamingState | null>(null);
 
   React.useEffect(() => {
     const timer = window.setInterval(() => {
@@ -267,6 +281,83 @@ function GamePage() {
   };
 
   const showFeedback = (text: string) => setFeedback(text);
+
+  // ============================
+  // AI 流式调用辅助
+  // ============================
+
+  const agentPlayerByRole = (role: string) => GAME_PLAYERS.find((p) => p.role === role);
+
+  const buildActorFromPlayer = (player: typeof GAME_PLAYERS[number]): Actor => ({
+    id: player.id,
+    name: player.name,
+    bio: player.background,
+    personality: "",
+    context: "",
+    secret: "",
+    violation: "",
+    isVictim: false,
+    isKiller: false,
+    isAssistant: false,
+    isPlayer: false,
+    isPartner: false,
+    roleType: player.agent ? "companion" : "suspect",
+  });
+
+  const buildSafeActors = (): SafeActor[] =>
+    GAME_PLAYERS.filter((p) => p.id !== "dm" && p.id !== "user").map((p) => ({
+      id: p.id,
+      name: p.name,
+      bio: p.background,
+      personality: "",
+      context: "",
+      isVictim: false,
+      isKiller: false,
+      isAssistant: false,
+      isPlayer: false,
+      isPartner: false,
+      roleType: p.agent ? "companion" : "suspect",
+    }));
+
+  const streamAgentSpeech = (
+    targetPlayerId: string,
+    userMessage: string,
+    onToken: (token: string) => void,
+    onDone: (final: string) => void,
+  ) => {
+    const player = playerById(targetPlayerId);
+    if (!player || !sessionId) return;
+
+    const chatMessages = [{ role: "user" as const, content: userMessage }];
+    if (queue.includes("user") || currentSpeaker === "user") {
+      // 如果玩家在发言队列中，注入讨论上下文
+    }
+
+    const req: InvocationRequest = {
+      globalStory: `剧名：${scriptTitle}。当前游戏阶段：${phase.label}(${phase.shortLabel})。`,
+      actor: buildActorFromPlayer(player),
+      sessionId,
+      detectiveName: "林晓青",
+      victimName: "未知",
+      allActors: buildSafeActors(),
+      chatMessages,
+      temperature: 0.8,
+    };
+
+    invokeAIStream(req, onToken, onDone, (error) => {
+      showFeedback(`AI 回复失败：${error.message}`);
+    });
+  };
+
+  const updateEventText = (eventId: number, newText: string) => {
+    setEvents((items) =>
+      items.map((item) =>
+        item.id === eventId && item.type === "speech"
+          ? { ...item, text: newText }
+          : item,
+      ),
+    );
+  };
 
   const confirmRoleSelection = async () => {
     if (!selectedRole) return;
@@ -348,13 +439,105 @@ function GamePage() {
 
   const finishSpeaker = () => {
     if (forcedAnswer && currentSpeaker === forcedAnswer.agentId) {
-      addEvent({
-        type: "speech",
-        speaker: `${playerById(forcedAnswer.agentId)?.name} Agent`,
-        text: `关于“${forcedAnswer.question}”，我认为值班表压痕说明修改发生在旧终端，而钥匙的持有者需要重点排查。`,
-        tone: "blue",
-      });
-      setForcedAnswer(null);
+      // 强制回答 → AI 流式生成回复
+      const agentPlayer = playerById(forcedAnswer.agentId);
+      if (agentPlayer && sessionId) {
+        const eventId = Date.now();
+        setEvents((items) => [
+          ...items,
+          {
+            id: eventId,
+            type: "speech",
+            speaker: `${agentPlayer.name} Agent`,
+            text: "（正在思考…）",
+            tone: "blue",
+          } as PublicEvent,
+        ]);
+        setStreaming({
+          active: true,
+          agentKey: forcedAnswer.agentId,
+          agentName: agentPlayer.name,
+          partial: "",
+          phase: "forced",
+          resolveId: eventId,
+        });
+        streamAgentSpeech(
+          forcedAnswer.agentId,
+          `你被指定回答以下问题："${forcedAnswer.question}"\n请根据你的角色身份和已知信息回答。注意：不能泄露角色秘密，但可以根据已有线索进行推理。`,
+          (token) => {
+            setStreaming((prev) => {
+              if (!prev) return null;
+              const updated = prev.partial + token;
+              updateEventText(eventId, updated);
+              return { ...prev, partial: updated };
+            });
+          },
+          (final) => {
+            setStreaming(null);
+            updateEventText(eventId, final);
+          },
+        );
+        setForcedAnswer(null);
+      } else {
+        addEvent({
+          type: "speech",
+          speaker: `${playerById(forcedAnswer.agentId)?.name} Agent`,
+          text: `关于“${forcedAnswer.question}”，我认为值班表压痕说明修改发生在旧终端，而钥匙的持有者需要重点排查。`,
+          tone: "blue",
+        });
+        setForcedAnswer(null);
+      }
+    } else if (currentSpeaker && currentSpeaker !== "user") {
+      // Agent 自由发言 — 根据当前讨论生成 AI 回复
+      const agentPlayer = playerById(currentSpeaker);
+      if (agentPlayer && sessionId) {
+        const eventId = Date.now();
+        const recentDiscussion = events
+          .filter((e): e is Extract<PublicEvent, { type: "speech" | "evidence" }> =>
+            e.type === "speech" || e.type === "evidence",
+          )
+          .slice(-5)
+          .map((e) =>
+            e.type === "speech"
+              ? `${e.speaker}：${e.text}`
+              : `${e.speaker} 出示了证物【${e.evidence.name}】`,
+          )
+          .join("\n");
+        setEvents((items) => [
+          ...items,
+          {
+            id: eventId,
+            type: "speech",
+            speaker: `${agentPlayer.name} Agent`,
+            text: "（正在思考…）",
+            tone: agentPlayer.color || "blue",
+          } as PublicEvent,
+        ]);
+        setStreaming({
+          active: true,
+          agentKey: currentSpeaker,
+          agentName: agentPlayer.name,
+          partial: "",
+          phase: "speech",
+          resolveId: eventId,
+        });
+        streamAgentSpeech(
+          currentSpeaker,
+          `最近讨论内容：\n${recentDiscussion || "（讨论刚开始）"}\n\n请根据当前讨论，以你的角色身份和已有信息发表看法。你可以：(1)回应其他人的话题 (2)提出新线索方向 (3)对其他角色的发言表示质疑。不要泄露你的角色秘密。`,
+          (token) => {
+            setStreaming((prev) => {
+              if (!prev) return null;
+              const updated = prev.partial + token;
+              updateEventText(eventId, updated);
+              return { ...prev, partial: updated };
+            });
+          },
+          (final) => {
+            setStreaming(null);
+            updateEventText(eventId, final);
+          },
+        );
+      }
     }
     setQueue((items) => {
       const remaining = items.filter((item) => item !== currentSpeaker);
@@ -370,9 +553,57 @@ function GamePage() {
     const introPlayer = playerById(currentIntroId);
     if (!introPlayer) return;
     setIntroduced((items) => [...items, currentIntroId]);
-    addEvent({ type: "speech", speaker: introPlayer.name, text: INTRO_LINES[currentIntroId], tone: introPlayer.color || "gray" });
-    setIntroSpotlight(introPlayer);
-    showFeedback(`${introPlayer.name} 已完成自我介绍。`);
+
+    if (introPlayer.agent && sessionId) {
+      // Agent → 使用 AI 流式生成介绍
+      const eventId = Date.now();
+      setEvents((items) => [
+        ...items,
+        {
+          id: eventId,
+          type: "speech",
+          speaker: introPlayer.name,
+          text: "（思考中…）",
+          tone: introPlayer.color || "gray",
+        } as PublicEvent,
+      ]);
+      setIntroSpotlight(introPlayer);
+      setStreaming({
+        active: true,
+        agentKey: introPlayer.id,
+        agentName: introPlayer.name,
+        partial: "",
+        phase: "intro",
+        resolveId: eventId,
+      });
+      streamAgentSpeech(
+        introPlayer.id,
+        `请以角色身份做自我介绍。你的角色是"${introPlayer.role}"，${introPlayer.publicIdentity}。背景：${introPlayer.background}。`,
+        (token) => {
+          setStreaming((prev) => {
+            if (!prev) return null;
+            const updated = prev.partial + token;
+            updateEventText(eventId, updated);
+            return { ...prev, partial: updated };
+          });
+        },
+        (final) => {
+          setStreaming(null);
+          updateEventText(eventId, final);
+          showFeedback(`${introPlayer.name} 已完成自我介绍。`);
+        },
+      );
+    } else {
+      // 真人玩家 → 使用硬编码台词
+      addEvent({
+        type: "speech",
+        speaker: introPlayer.name,
+        text: INTRO_LINES[currentIntroId],
+        tone: introPlayer.color || "gray",
+      });
+      setIntroSpotlight(introPlayer);
+      showFeedback(`${introPlayer.name} 已完成自我介绍。`);
+    }
   };
 
   const randomSearch = async () => {
@@ -621,29 +852,112 @@ function GamePage() {
       return;
     }
     const sourceTitle = discussionSourceTitle(source);
-    const answer = source.type === "evidence"
-      ? `我检查过“${source.evidence.name}”的来源。它能证明时间和地点存在关联，但还不能单独证明持有人身份。`
-      : `关于这段发言，我的判断是其中有一处时间顺序需要复核。我愿意把相关行动记录公开出来接受比对。`;
-    const record: InquiryRecord = {
-      id: Date.now(),
-      sourceEventId: source.id,
-      sourceType: source.type === "evidence" ? "证据" : "关键发言",
-      sourceTitle,
-      evidence: source.type === "evidence" ? source.evidence : undefined,
-      targetId: target.id,
-      targetName: `${target.role} · ${target.name}`,
-      question: inquiryQuestion.trim(),
-      answer,
-    };
-    setInquiryRecords((items) => [...items, record]);
-    addEvent({
-      type: "inquiry",
-      asker: "林晓青",
-      target: record.targetName,
-      sourceTitle,
-      question: record.question,
-      answer,
-    });
+    const recordId = Date.now();
+
+    if (target.agent && sessionId) {
+      // Agent 质询 → AI 流式生成回答
+      const eventId = Date.now();
+      setEvents((items) => [
+        ...items,
+        {
+          id: eventId,
+          type: "inquiry",
+          asker: "林晓青",
+          target: `${target.role} · ${target.name}`,
+          sourceTitle,
+          question: inquiryQuestion.trim(),
+          answer: "（正在思考…）",
+        } as PublicEvent,
+      ]);
+
+      const chatMessages: LLMMessage[] = [
+        { role: "user", content: `玩家对你说："${inquiryQuestion.trim()}"（背景：对方正在质询你关于「${sourceTitle}」的内容。请以角色身份回答，不要泄露秘密，可以回避或转移话题。）` },
+      ];
+
+      const req: InvocationRequest = {
+        globalStory: `剧名：${scriptTitle}。当前阶段：线索交流。`,
+        actor: buildActorFromPlayer(target),
+        sessionId,
+        detectiveName: "林晓青",
+        victimName: "未知",
+        allActors: buildSafeActors(),
+        chatMessages,
+        temperature: 0.7,
+      };
+
+      invokeAIStream(
+        req,
+        (token) => {
+          setEvents((items) =>
+            items.map((item) =>
+              item.id === eventId && item.type === "inquiry"
+                ? { ...item, answer: item.answer === "（正在思考…）" ? token : item.answer + token }
+                : item,
+            ),
+          );
+        },
+        (final) => {
+          const record: InquiryRecord = {
+            id: recordId,
+            sourceEventId: source.id,
+            sourceType: source.type === "evidence" ? "证据" : "关键发言",
+            sourceTitle,
+            evidence: source.type === "evidence" ? source.evidence : undefined,
+            targetId: target.id,
+            targetName: `${target.role} · ${target.name}`,
+            question: inquiryQuestion.trim(),
+            answer: final,
+          };
+          setInquiryRecords((items) => [...items, record]);
+          setEvents((items) =>
+            items.map((item) =>
+              item.id === eventId && item.type === "inquiry"
+                ? { ...item, answer: final }
+                : item,
+            ),
+          );
+        },
+        (error) => {
+          showFeedback(`AI 质询回复失败：${error.message}`);
+          const fallbackAnswer = source.type === "evidence"
+            ? `我检查过“${source.evidence.name}”的来源。它能证明时间和地点存在关联，但还不能单独证明持有人身份。`
+            : `关于这段发言，我的判断是其中有一处时间顺序需要复核。我愿意把相关行动记录公开出来接受比对。`;
+          setEvents((items) =>
+            items.map((item) =>
+              item.id === eventId && item.type === "inquiry"
+                ? { ...item, answer: fallbackAnswer }
+                : item,
+            ),
+          );
+        },
+      );
+    } else {
+      // 真人质询 → 硬编码回答
+      const answer = source.type === "evidence"
+        ? `我检查过“${source.evidence.name}”的来源。它能证明时间和地点存在关联，但还不能单独证明持有人身份。`
+        : `关于这段发言，我的判断是其中有一处时间顺序需要复核。我愿意把相关行动记录公开出来接受比对。`;
+      const record: InquiryRecord = {
+        id: recordId,
+        sourceEventId: source.id,
+        sourceType: source.type === "evidence" ? "证据" : "关键发言",
+        sourceTitle,
+        evidence: source.type === "evidence" ? source.evidence : undefined,
+        targetId: target.id,
+        targetName: `${target.role} · ${target.name}`,
+        question: inquiryQuestion.trim(),
+        answer,
+      };
+      setInquiryRecords((items) => [...items, record]);
+      addEvent({
+        type: "inquiry",
+        asker: "林晓青",
+        target: record.targetName,
+        sourceTitle,
+        question: record.question,
+        answer,
+      });
+    }
+
     setRightTab("chat");
     setDialog(null);
     setInquiryQuestion("");
@@ -1134,6 +1448,14 @@ function GamePage() {
   const footerActions = () => {
     if (phase.id === "vote") return <Text c="dimmed">投票阶段：公共发言、私聊和证物操作已锁定。</Text>;
     if (phase.id !== "discussion") return <Group><Button radius="xl" onClick={advancePhase} disabled={(phase.id === "role-selection" && !roleConfirmed) || (phase.id === "script-reading" && !readingDone) || (phase.id === "intro" && introduced.length < 5) || (phase.id === "search" && searchesLeft > 0)}>进入下一阶段</Button><Text size="sm" c="dimmed">完成当前阶段要求后继续</Text></Group>;
+    if (streaming?.active) {
+      return (
+        <Group gap="xs" wrap="nowrap" style={{ width: "100%" }}>
+          <Badge size="lg" color="blue" variant="dot">{streaming.agentName} AI 正在发言…</Badge>
+          <Text size="sm" c="dimmed">等待 AI 生成回复后自动结束发言</Text>
+        </Group>
+      );
+    }
     return (
       <Group gap="xs" wrap="nowrap" style={{ width: "100%" }}>
         {!isUserSpeaking && !userQueued && <Button radius="xl" onClick={joinQueue} disabled={Boolean(forcedAnswer)}>选择发言</Button>}

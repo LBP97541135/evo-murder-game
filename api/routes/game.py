@@ -2,16 +2,17 @@
 EvoMap Murder Game - Game Session Routes
 
 游戏 Session 创建、阶段管理、广播、投票、复盘。
+v2.1 新增：Agent 游戏状态、意图系统、记忆压缩。
 """
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from typing import Optional
 
 from api.schemas.invoke_types import GameSessionRequest, GameSessionResponse
 from api.agents.agent_orchestrator import AgentRole
 from api.agents.game_engine import game_engine, GamePhase
 from api.orchestrator import orchestrator
-from pydantic import BaseModel
-from typing import Optional
 
 router = APIRouter()
 
@@ -30,13 +31,25 @@ class PhaseForceRequest(BaseModel):
     phase: str
 
 
+class AgentChatRequest(BaseModel):
+    session_id: str
+    agent_key: str
+    content: str
+    role: str = "agent"  # agent / player / dm
+
+
+class ApproveIntentRequest(BaseModel):
+    intent_type: str      # interject / private_chat / present_evidence
+    approved: bool
+
+
 # ============================
 # 游戏 Session
 # ============================
 
 @router.post("/create-session", response_model=GameSessionResponse)
 async def create_game_session(req: GameSessionRequest):
-    """创建游戏 Session，同时初始化游戏引擎状态。"""
+    """创建游戏 Session，同时初始化游戏引擎和所有 Agent 游戏状态。"""
     if not orchestrator.agents:
         raise HTTPException(status_code=400, detail="No agents registered yet")
 
@@ -51,7 +64,7 @@ async def create_game_session(req: GameSessionRequest):
     session_id = result.get("session_id", "")
     session_info = orchestrator.sessions.get(session_id, {})
 
-    # 初始化游戏引擎
+    # 初始化游戏引擎（同时初始化 Agent 游戏状态 + 胶囊注入）
     game_engine.create_game(script_id=req.script_id, session_id=session_id)
 
     return GameSessionResponse(
@@ -76,7 +89,7 @@ async def get_game_phase(session_id: str):
 
 @router.post("/phase/{session_id}/advance")
 async def advance_game_phase(session_id: str):
-    """推进到下一阶段。"""
+    """推进到下一阶段，同时触发所有 Agent 的记忆压缩。"""
     result = game_engine.advance_phase(session_id)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result)
@@ -148,3 +161,70 @@ async def record_chat(session_id: str):
 async def post_game_reflection(session_id: str, game_result: dict):
     """游戏结束后，所有 Agent 执行自评并记录经验。"""
     return orchestrator.post_game_reflection(session_id, game_result)
+
+
+# ============================
+# Agent 游戏状态
+# ============================
+
+@router.get("/agent-state/{session_id}/{agent_key}")
+async def get_agent_state(session_id: str, agent_key: str):
+    """获取指定 Agent 的完整游戏状态（记忆/角色/意图/证物）。"""
+    state = game_engine.get_agent_state(session_id, agent_key)
+    if not state:
+        raise HTTPException(status_code=404, detail="Agent state not found")
+    return {"success": True, "state": state}
+
+
+# ============================
+# Agent 行动意图
+# ============================
+
+@router.get("/intents/{session_id}/{agent_key}")
+async def get_agent_intents(session_id: str, agent_key: str):
+    """获取 Agent 当前的行动意图（已生成或空）。"""
+    result = game_engine.get_agent_intents(session_id, agent_key)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result)
+    return result
+
+
+@router.post("/intents/{session_id}/{agent_key}/generate")
+async def generate_agent_intents(session_id: str, agent_key: str):
+    """让 Agent 根据当前局势生成行动意图（插队/私聊/出示证物）。"""
+    result = game_engine.generate_agent_intents(session_id, agent_key)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result)
+    return result
+
+
+@router.post("/intents/{session_id}/{agent_key}/approve")
+async def approve_agent_intent(session_id: str, agent_key: str, req: ApproveIntentRequest):
+    """玩家批准或拒绝 Agent 的某个行动意图。"""
+    result = game_engine.approve_intent(session_id, agent_key, req.intent_type, req.approved)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result)
+    return result
+
+
+# ============================
+# Agent 发言
+# ============================
+
+@router.post("/agent-chat/{session_id}")
+async def agent_chat(session_id: str, req: AgentChatRequest):
+    """Agent 发言（带角色+记忆+证物感知，自动写入 chat_history）。"""
+    game = game_engine.get_game(session_id)
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    # 写入 chat_history
+    game_engine.add_chat_to_agent(session_id, req.agent_key, req.role, req.content)
+    game_engine.record_chat(session_id, from_agent=req.agent_key, content=req.content)
+
+    return {
+        "success": True,
+        "session_id": session_id,
+        "agent_key": req.agent_key,
+        "chat_count": game.get("chat_count", 0),
+    }

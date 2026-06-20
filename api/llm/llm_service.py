@@ -44,6 +44,46 @@ ROLE_SYSTEM_PROMPTS = {
 }
 
 
+# ============================
+# Agent 记忆压缩 & 意图生成 Prompt
+# ============================
+
+MEMORY_COMPRESSION_PROMPT = (
+    "你是一个对话摘要专家。请将以下对话内容压缩为2-3句话的摘要，"
+    "并列出最重要的3-5个关键事实（涉及的关键线索、人物关系变化、嫌疑指向等）。\n"
+    "输出 JSON 格式：\n"
+    '{{"summary": "2-3句话摘要", "key_facts": ["事实1", "事实2"]}}\n'
+    "不要输出其他内容。"
+)
+
+INTENT_GENERATION_PROMPT = (
+    "你是一个剧本杀 Agent，正在决定下一步行动。\n"
+    "基于你的角色身份、当前记忆、已知证物和局势，你需要判断：\n"
+    "1. 是否想插队发言（interject）？——你是否有紧急信息要说？\n"
+    "2. 是否想发起私聊（private_chat）？——你想悄悄和谁说什么？\n"
+    "3. 是否想出示证物（present_evidence）？——你想把某个证物给谁看？\n"
+    "\n"
+    "注意：喊话（callout）是在发言阶段直接对某个 Agent 提问，不需要单独意图。\n"
+    "\n"
+    "请输出 JSON 格式，没有意图的字段设为 null：\n"
+    '{{"interject": {{"reason": "...", "urgency": "low|medium|high"}} or null, '
+    '"private_chat": {{"target": "对方名字", "topic": "想说什么"}} or null, '
+    '"present_evidence": {{"evidence_id": "...", "target": "给谁看", "reason": "为什么"}} or null}}\n'
+)
+
+AGENT_CHAT_BUILDER_PROMPT = (
+    "根据以下信息生成你的发言：\n"
+    "- 你的角色身份和秘密\n"
+    "- 当前游戏阶段\n"
+    "- 上一阶段的摘要和关键事实\n"
+    "- 当前阶段的对话记录\n"
+    "- 你已发现的证物\n"
+    "\n"
+    "请以角色身份自然发言。如果是被喊话，先回答对方的提问。\n"
+    "如需出示证物、喊话其他 Agent 或发起私聊，请在发言末尾附加行动标记。"
+)
+
+
 def get_provider_base_url(service: str) -> str:
     """根据推理服务类型返回 API base URL。"""
     urls = {

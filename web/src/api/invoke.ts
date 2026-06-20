@@ -313,6 +313,8 @@ export const createGameSession = async (scriptId: string, topic: string, playerR
 };
 export const getGamePhase = (sessionId: string) => get<Record<string, any>>(`/game/phase/${sessionId}`);
 export const getGameSessionInfo = (sessionId: string) => get<Record<string, any>>(`/game/session-info/${sessionId}`);
+export const playerChat = (sessionId: string, content: string, targetKey = "") =>
+  post<Record<string, any>>(`/game/chat/${sessionId}`, { content, target_key: targetKey });
 export const advanceGamePhase = (sessionId: string) => post<Record<string, any>>(`/game/phase/${sessionId}/advance`);
 export const forceGamePhase = (sessionId: string, phase: string) =>
   post<Record<string, any>>(`/game/phase/${sessionId}/force`, { phase });
@@ -357,6 +359,9 @@ export const recordAgentChat = (sessionId: string, agentKey: string, content: st
     content,
     role,
   });
+export const initSpeakRound = (sessionId: string) => post<Record<string, any>>(`/game/speak-round/${sessionId}/init`);
+export const getSpeakRound = (sessionId: string) => get<Record<string, any>>(`/game/speak-round/${sessionId}`);
+export const nextSpeakRound = (sessionId: string) => post<Record<string, any>>(`/game/speak-round/${sessionId}/next`);
 
 export const getEvidences = async (
   scriptId: string,

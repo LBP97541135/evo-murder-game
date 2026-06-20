@@ -199,6 +199,82 @@ class AgentGameState:
         return state
 
 
+class SpeakRoundState:
+    """Minimal in-memory speaking round state for companion turn order."""
+
+    def __init__(self, speakers: list[str], current_index: int = 0):
+        self.speakers = [speaker for speaker in speakers if speaker]
+        self.current_index = current_index if 0 <= current_index < len(self.speakers) else 0
+        self.interject_stack: list[dict] = []
+        self.round_active = bool(self.speakers)
+        self.round_complete = not self.speakers
+
+    @property
+    def current_speaker(self) -> Optional[str]:
+        if not self.round_active or self.round_complete or not self.speakers:
+            return None
+        if self.current_index >= len(self.speakers):
+            return None
+        return self.speakers[self.current_index]
+
+    def queue(self) -> list[str]:
+        current = self.current_speaker
+        if not current:
+            return []
+        return [current]
+
+    def next(self) -> dict:
+        if not self.round_active:
+            return self.to_dict()
+
+        if self.interject_stack:
+            restored = self.interject_stack.pop()
+            self.current_index = restored.get("return_index", self.current_index)
+        else:
+            self.current_index += 1
+
+        if self.current_index >= len(self.speakers):
+            self.round_complete = True
+            self.round_active = False
+
+        return self.to_dict()
+
+    def interject(self, speaker: str, reason: str = "") -> dict:
+        if not speaker:
+            return self.to_dict()
+
+        current = self.current_speaker
+        if current == speaker:
+            return self.to_dict()
+
+        if current is not None:
+            self.interject_stack.append({
+                "speaker": current,
+                "return_index": self.current_index,
+                "reason": reason,
+            })
+
+        if speaker in self.speakers:
+            self.current_index = self.speakers.index(speaker)
+        else:
+            self.speakers.append(speaker)
+            self.current_index = len(self.speakers) - 1
+
+        self.round_active = True
+        self.round_complete = False
+        return self.to_dict()
+
+    def to_dict(self) -> dict:
+        return {
+            "round_active": self.round_active,
+            "round_complete": self.round_complete,
+            "current_speaker": self.current_speaker,
+            "queue": self.queue(),
+            "all_speakers": list(self.speakers),
+            "interject_stack": list(self.interject_stack),
+        }
+
+
 # ============================
 # 游戏引擎
 # ============================
@@ -729,6 +805,54 @@ class GameEngine:
     # ============================
     # Agent 游戏状态 API
     # ============================
+
+    def _companion_keys(self, game: dict) -> list[str]:
+        return [
+            key
+            for key, state in game.get("agents", {}).items()
+            if state.character.get("roleType") == "companion"
+        ]
+
+    def init_speak_round(self, game_id: str) -> dict:
+        game = self.get_game(game_id)
+        if not game:
+            return {"error": "game_not_found"}
+
+        speak_round = SpeakRoundState(self._companion_keys(game))
+        game["speak_round"] = speak_round
+        self._sync_to_db(game)
+        return {"success": True, **speak_round.to_dict()}
+
+    def get_speak_round(self, game_id: str) -> dict:
+        game = self.get_game(game_id)
+        if not game:
+            return {"error": "game_not_found"}
+
+        speak_round = game.get("speak_round")
+        if not speak_round:
+            return {"error": "speak_round_not_initialized"}
+
+        if hasattr(speak_round, "to_dict"):
+            return {"success": True, **speak_round.to_dict()}
+        if isinstance(speak_round, dict):
+            return {"success": True, **speak_round}
+        return {"error": "invalid_speak_round_state"}
+
+    def next_speaker(self, game_id: str) -> dict:
+        game = self.get_game(game_id)
+        if not game:
+            return {"error": "game_not_found"}
+
+        speak_round = game.get("speak_round")
+        if not speak_round:
+            return {"error": "speak_round_not_initialized"}
+
+        result = speak_round.next()
+        self._sync_to_db(game)
+        return {"success": True, **result}
+
+    def start_new_round(self, game_id: str) -> dict:
+        return self.init_speak_round(game_id)
 
     def get_agent_state(self, game_id: str, agent_key: str) -> Optional[dict]:
         """获取指定 Agent 的游戏状态。"""

@@ -58,7 +58,11 @@ import {
   getConversations,
   getGamePhase,
   getGameSessionInfo,
+  getSpeakRound,
   getEvidences,
+  initSpeakRound,
+  nextSpeakRound,
+  playerChat,
   presentEvidence,
   saveConversation,
   submitGameVote,
@@ -227,6 +231,14 @@ type SessionInfo = {
   player?: Record<string, any>;
   agents?: Array<Record<string, any>>;
   phase?: Record<string, any>;
+  speak_round?: Record<string, any>;
+};
+
+type SpeakRound = {
+  current_speaker?: string | null;
+  queue?: string[];
+  round_active?: boolean;
+  round_complete?: boolean;
 };
 
 const initialEvents: PublicEvent[] = [
@@ -302,8 +314,10 @@ function GamePage() {
   const [searchesLeft, setSearchesLeft] = React.useState(2);
   const [evidence, setEvidence] = React.useState<Evidence[]>([]);
   const [newEvidence, setNewEvidence] = React.useState<Evidence | null>(null);
+  const [speakRound, setSpeakRound] = React.useState<SpeakRound | null>(null);
   const [queue, setQueue] = React.useState<string[]>([]);
   const [currentSpeaker, setCurrentSpeaker] = React.useState<string | null>(null);
+  const [isAgentReplying, setIsAgentReplying] = React.useState(false);
   const [forcedAnswer, setForcedAnswer] = React.useState<{ asker: string; agentId: string; question: string } | null>(null);
   const [events, setEvents] = React.useState<PublicEvent[]>([]);
   const [rightTab, setRightTab] = React.useState<string | null>("script");
@@ -335,6 +349,8 @@ function GamePage() {
   const [inquiryRecords, setInquiryRecords] = React.useState<InquiryRecord[]>([]);
   const [privateInviteStatus, setPrivateInviteStatus] = React.useState<"未处理" | "稍后处理" | "已接受" | "已拒绝">("未处理");
   const [chatHistoryOpen, setChatHistoryOpen] = React.useState(false);
+  const handledAgentTurnRef = React.useRef("");
+  const speakRoundLoadRef = React.useRef("");
 
   React.useEffect(() => {
     const timer = window.setInterval(() => {
@@ -344,18 +360,7 @@ function GamePage() {
   }, [currentSpeaker]);
 
   React.useEffect(() => {
-    if (!sessionId) return;
-    getEvidences(id, sessionId)
-      .then((result) => {
-        const records = Array.from(
-          new Map(result.evidences.map(backendEvidenceToGameEvidence).map((item) => [item.id, item])).values(),
-        );
-        setEvidence(records);
-        setSelectedEvidenceId((current) => current || records[0]?.id || "");
-      })
-      .catch((error) => {
-        showFeedback(`后端证物加载失败：${error instanceof Error ? error.message : String(error)}`);
-      });
+    refreshEvidence();
   }, [id, sessionId]);
 
   React.useEffect(() => {
@@ -364,44 +369,16 @@ function GamePage() {
       .then((result) => {
         setSessionInfo(result as SessionInfo);
         setBackendCanAdvance(Boolean(result?.phase?.can_advance));
+        applySpeakRoundState(result?.speak_round);
       })
       .catch(() => {
         setSessionInfo(null);
         setBackendCanAdvance(false);
       });
-  }, [sessionId, phaseIndex]);
+  }, [phaseIndex, sessionId]);
 
   React.useEffect(() => {
-    if (!sessionId) return;
-    getConversations(sessionId)
-      .then((result) => {
-        const mapped: PublicEvent[] = (result.conversations || [])
-          .filter((item: Record<string, any>) => item.finalResponse)
-          .map((item: Record<string, any>, index: number) => {
-            const actorName = String(item.actorName || "");
-            const playerSpeaker = resolveRoleName(sessionInfo?.player?.name || selectedRoleData?.role, "玩家");
-            const matchedAgent = (sessionInfo?.agents || []).find((agent) =>
-              [String(agent.key || ""), String(agent.name || "")].includes(actorName),
-            );
-            const speaker = actorName === "player"
-              ? playerSpeaker
-              : matchedAgent
-                ? resolveRoleName(matchedAgent.name || matchedAgent.key, String(matchedAgent.name || actorName))
-                : resolveRoleName(actorName, actorName);
-            return {
-              id: Date.now() + index,
-              type: "speech",
-              speaker,
-              text: String(item.finalResponse || ""),
-              tone: actorName === "player" ? "orange" : "blue",
-            } as PublicEvent;
-          });
-        setEvents((current) => {
-          const localNonSpeech = current.filter((item) => item.type !== "speech");
-          return [...mapped, ...localNonSpeech];
-        });
-      })
-      .catch(() => undefined);
+    refreshConversations();
   }, [selectedRole, sessionId, sessionInfo]);
 
   const roleOptions = React.useMemo(() => {
@@ -474,7 +451,7 @@ function GamePage() {
 
   const players: RuntimePlayer[] = backendPlayers.length
     ? backendPlayers
-    : GAME_PLAYERS.map((player) =>
+    : GAME_PLAYERS.filter((p) => p.id !== "dm").map((player) =>
         player.id === "user" && selectedRoleData
           ? {
               ...player,
@@ -530,11 +507,54 @@ function GamePage() {
 
   React.useEffect(() => {
     if (phase.id !== "discussion") return;
-    const discussionPlayers = players.filter((player) => player.id !== "user" && player.id !== "dm").map((player) => player.id);
-    if (!discussionPlayers.length) return;
-    setQueue((currentQueue) => currentQueue.length ? currentQueue : discussionPlayers);
-    setCurrentSpeaker((currentId) => currentId || discussionPlayers[0] || null);
-  }, [phase.id, players]);
+    if (!sessionId) return;
+    const loadKey = `${sessionId}:${phase.id}`;
+    if (speakRoundLoadRef.current === loadKey) return;
+    speakRoundLoadRef.current = loadKey;
+    const loadRound = async () => {
+      const result = await getSpeakRound(sessionId).catch(() => null);
+      const hasQueue = Boolean(result && Array.isArray(result.queue) && result.queue.length > 0);
+      if (result?.current_speaker || hasQueue) {
+        applySpeakRoundState(result);
+        return;
+      }
+      const initialized = await initSpeakRound(sessionId).catch(() => null);
+      applySpeakRoundState(initialized);
+    };
+    loadRound().catch(() => undefined);
+  }, [phase.id, sessionId]);
+
+  React.useEffect(() => {
+    if (phase.id !== "discussion" || !sessionId || !currentSpeaker) return;
+    const speaker = playerById(currentSpeaker);
+    if (!speaker?.agent || isAgentReplying) return;
+    const turnKey = `${currentSpeaker}:${queue.join("|")}:${forcedAnswer?.question || ""}`;
+    if (handledAgentTurnRef.current === turnKey) return;
+    handledAgentTurnRef.current = turnKey;
+    const prompt = forcedAnswer?.agentId === currentSpeaker
+      ? forcedAnswer.question
+      : "请以当前角色身份进行本轮公开发言，基于已知线索给出一句有信息量的观点。";
+
+    setIsAgentReplying(true);
+    playerChat(sessionId, prompt, currentSpeaker)
+      .then(async (result) => {
+        const reply = String(result.reply || "").trim();
+        if (!reply) return;
+        await saveConversation({
+          sessionId,
+          actorName: currentSpeaker,
+          chatMessages: [{ role: "user", content: prompt }],
+          finalResponse: reply,
+        });
+        await refreshConversations();
+        refreshBackendPhase();
+      })
+      .catch((error) => {
+        handledAgentTurnRef.current = "";
+        showFeedback(`Agent 发言失败：${error instanceof Error ? error.message : String(error)}`);
+      })
+      .finally(() => setIsAgentReplying(false));
+  }, [currentSpeaker, forcedAnswer, isAgentReplying, phase.id, queue, sessionId, players]);
 
   React.useEffect(() => {
     try {
@@ -547,6 +567,74 @@ function GamePage() {
   const addEvent = (event: PublicEventInput) => {
     setEvents((items) => [...items, { ...event, id: Date.now() } as PublicEvent]);
   };
+
+  function applySpeakRoundState(result: Record<string, any> | SpeakRound | null | undefined) {
+    if (!result) return;
+    const currentSpeakerKey = typeof result.current_speaker === "string" ? result.current_speaker : null;
+    const nextQueue = Array.isArray(result.queue)
+      ? result.queue.map((item) => String(item))
+      : currentSpeakerKey
+        ? [currentSpeakerKey]
+        : [];
+    setSpeakRound(result as SpeakRound);
+    setCurrentSpeaker(currentSpeakerKey);
+    setQueue(nextQueue);
+  }
+
+  function refreshEvidence() {
+    if (!sessionId) return Promise.resolve();
+    return getEvidences(id, sessionId)
+      .then((result) => {
+        const records = Array.from(
+          new Map(result.evidences.map(backendEvidenceToGameEvidence).map((item) => [item.id, item])).values(),
+        );
+        setEvidence(records);
+        setSelectedEvidenceId((currentId) => currentId || records[0]?.id || "");
+      })
+      .catch((error) => {
+        showFeedback(`后端证物加载失败：${error instanceof Error ? error.message : String(error)}`);
+      });
+  }
+
+  function refreshConversations() {
+    if (!sessionId) return Promise.resolve();
+    return getConversations(sessionId)
+      .then((result) => {
+        const mapped: PublicEvent[] = (result.conversations || [])
+          .filter((item: Record<string, any>) => item.finalResponse)
+          .map((item: Record<string, any>, index: number) => {
+            const actorName = String(item.actorName || "");
+            const playerSpeaker = resolveRoleName(sessionInfo?.player?.name || selectedRoleData?.role, "玩家");
+            const matchedAgent = (sessionInfo?.agents || []).find((agent) =>
+              [String(agent.key || ""), String(agent.name || "")].includes(actorName),
+            );
+            const speaker = actorName === "player"
+              ? playerSpeaker
+              : matchedAgent
+                ? resolveRoleName(matchedAgent.name || matchedAgent.key, String(matchedAgent.name || actorName))
+                : resolveRoleName(actorName, actorName);
+            return {
+              id: Date.now() + index,
+              type: "speech",
+              speaker,
+              text: String(item.finalResponse || ""),
+              tone: actorName === "player" ? "orange" : "blue",
+            } as PublicEvent;
+          });
+        setEvents((current) => {
+          const localNonSpeech = current.filter((item) => item.type !== "speech");
+          return [...mapped, ...localNonSpeech];
+        });
+      })
+      .catch(() => undefined);
+  }
+
+  function refreshSpeakRound() {
+    if (!sessionId) return Promise.resolve();
+    return getSpeakRound(sessionId)
+      .then((result) => applySpeakRoundState(result))
+      .catch(() => undefined);
+  }
 
   const showFeedback = (text: string) => setFeedback(text);
   const refreshBackendPhase = () => {
@@ -608,9 +696,8 @@ function GamePage() {
     setPhaseIndex(index);
     setSpeakerSeconds(90);
     if (GAME_PHASES[index].id === "discussion") {
-      const discussionPlayers = players.filter((player) => player.id !== "user" && player.id !== "dm").map((player) => player.id);
-      setCurrentSpeaker(discussionPlayers[0] || null);
-      setQueue(discussionPlayers);
+      setCurrentSpeaker(null);
+      setQueue([]);
     }
   };
 
@@ -635,23 +722,16 @@ function GamePage() {
     showFeedback("已取消发言申请。");
   };
 
-  const finishSpeaker = () => {
+  const finishSpeaker = async () => {
+    if (!sessionId) return;
+    const next = await nextSpeakRound(sessionId).catch(() => null);
     if (forcedAnswer && currentSpeaker === forcedAnswer.agentId) {
-      addEvent({
-        type: "speech",
-        speaker: `${playerById(forcedAnswer.agentId)?.role || playerById(forcedAnswer.agentId)?.name || "Agent"} Agent`,
-        text: `关于“${forcedAnswer.question}”，我认为值班表压痕说明修改发生在旧终端，而钥匙的持有者需要重点排查。`,
-        tone: "blue",
-      });
       setForcedAnswer(null);
     }
-    setQueue((items) => {
-      const remaining = items.filter((item) => item !== currentSpeaker);
-      setCurrentSpeaker(remaining[0] || null);
-      return remaining;
-    });
+    applySpeakRoundState(next);
     setSpeakerSeconds(90);
-    showFeedback("当前发言已结束，发言权已交给队列中的下一位。");
+    refreshConversations();
+    showFeedback("当前发言已结束，发言权已交给下一位。");
   };
 
   const completeIntro = () => {
@@ -660,6 +740,16 @@ function GamePage() {
     if (!introPlayer) return;
     setIntroduced((items) => [...items, currentIntroId]);
     setIntroSpotlight(introPlayer);
+    // 将自我介绍台词加入公共事件列表，使其显示在主面板上
+    const introLine = resolveIntroLine(introPlayer);
+    if (introLine) {
+      addEvent({
+        type: "speech",
+        speaker: introPlayer.role,
+        text: introLine,
+        tone: introPlayer.id === "user" ? "orange" : "blue",
+      });
+    }
     showFeedback(`${introPlayer.name} 已完成自我介绍。`);
   };
 
@@ -771,8 +861,8 @@ function GamePage() {
         chatMessages: [{ role: "user", content }],
         finalResponse: content,
       });
-      addEvent({ type: "speech", speaker: userSpeakerName, text: content, tone: "orange" });
       setPublicMessage("");
+      refreshConversations();
       refreshBackendPhase();
     } catch (error) {
       showFeedback(`后端保存公开发言失败：${error instanceof Error ? error.message : String(error)}`);
@@ -1193,7 +1283,7 @@ function GamePage() {
             <Group justify="space-between"><Box><Text size="xs" c="dimmed">当前自我介绍</Text><Title order={3}>{introPlayer?.name || "全部完成"} · {introPlayer?.role}</Title></Box><Badge color="orange">{introduced.length} / 5 已完成</Badge></Group>
             {introPlayer && <Text mt="md" c="dimmed">本阶段仅允许自我介绍和指定 Agent 自我介绍，不可出示证物、搜证或深入私聊。</Text>}
           </Paper>
-          <Stack gap="xs">{events.filter((event) => event.type === "speech" && INTRO_LINES && Object.values(INTRO_LINES).includes(event.text)).map(renderEvent)}</Stack>
+          <Stack gap="xs">{events.filter((event) => event.type === "speech").map(renderEvent)}</Stack>
           {introPlayer && <Button onClick={completeIntro}>{introPlayer.id === "user" ? "发言" : "下一位"}</Button>}
         </Stack>
       );

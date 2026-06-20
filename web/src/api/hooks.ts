@@ -4,6 +4,9 @@ import { backendScriptToCard } from "./adapters";
 import { getScript, listScripts, type BackendScript } from "./invoke";
 import type { ScriptCard } from "../pages/scriptData";
 
+/** 前端不展示的剧本 ID（不修改后端数据库） */
+const HIDDEN_SCRIPT_IDS = new Set(["dried-well", "fogbound-belfry", "floating-isle"]);
+
 export function useScripts() {
   const [scripts, setScripts] = React.useState<ScriptCard[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -13,8 +16,11 @@ export function useScripts() {
     let active = true;
     listScripts()
       .then((items) => {
-        if (active && items.length) setScripts(items.map(backendScriptToCard));
-        if (active) setError(null);
+        if (active) {
+          const visible = items.filter((s) => !HIDDEN_SCRIPT_IDS.has(s.id));
+          setScripts(visible.map(backendScriptToCard));
+          setError(null);
+        }
       })
       .catch((reason) => {
         if (active) setError(reason instanceof Error ? reason.message : String(reason));
@@ -37,8 +43,9 @@ export function useScript(scriptId?: string) {
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (!scriptId) {
+    if (!scriptId || HIDDEN_SCRIPT_IDS.has(scriptId)) {
       setLoading(false);
+      setError("剧本不存在");
       return;
     }
     let active = true;

@@ -13,6 +13,9 @@
 - [ ] Agent 角色体系设计文档（DM/陪玩/助手的职责边界）
 - [ ] 进化机制设计文档（constitution改写策略、Memory信号词规范）
 
+## 近期完成
+- ✅ Agent 广场页面重构（AgentPanel）：横向无边框标签导航，陪玩Agent/DM Agent/Agent阵容搭配三大模块，含筛选/搜索/金牌轮播/瀑布流ID名片/圆桌视角阵容搭配
+
 ## 进度
 - ✅ 协作规范.md（Git规范/代码风格/开发流程/安全红线/EvoMap使用规范）
 - ✅ 核心游戏流程迁移方案.md（ai-murder-mystery → evo-murder-game 的完整迁移计划）

@@ -701,7 +701,6 @@ function GamePage() {
           onClick={() => phase.id === "discussion" && openDiscussionDetail(event.id)}
         >
           <Group align="flex-start" wrap="nowrap">
-<<<<<<< HEAD
             {(() => {
               const speakerPlayer = GAME_PLAYERS.find((p) => p.name === event.speaker || `${p.name} Agent` === event.speaker);
               const speakerPortrait = speakerPlayer ? characterPortraits[speakerPlayer.role] : undefined;
@@ -711,15 +710,11 @@ function GamePage() {
                 <Avatar size="sm" color={event.tone}>{event.speaker.slice(0, 1)}</Avatar>
               );
             })()}
-            <Box><Text size="sm" fw={800} c={`${event.tone}.3`}>{event.speaker}</Text><Text size="sm" c="gray.3">{event.text}</Text></Box>
-=======
-            <Avatar size="sm" color={event.tone}>{event.speaker.slice(0, 1)}</Avatar>
             <Box style={{ flex: 1 }}>
               <Text size="sm" fw={800} c={`${event.tone}.3`}>{event.speaker}</Text>
               <Text size="sm" c="gray.3" lh={1.65}>{event.text}</Text>
               {phase.id === "discussion" && <Text size="xs" c="dimmed" mt={6}>点击查看发言详情</Text>}
             </Box>
->>>>>>> 45115ae951f37312eb6d6648439e220503b86691
           </Group>
         </Paper>
       );

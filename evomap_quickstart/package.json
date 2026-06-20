@@ -1,0 +1,17 @@
+{
+  "name": "evomap-quickstart",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "EvoMap OAuth2 + PKCE 本地试水脚本(Multi_Agents_Company 专用)",
+  "scripts": {
+    "start": "node --env-file=.env index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0"
+  },
+  "engines": {
+    "node": ">=20.6"
+  }
+}

@@ -115,28 +115,43 @@ class RecipeService:
     ) -> RecipeDefinition:
         """构建一场剧本杀游戏的 Recipe 模板。
 
-        典型流水线：
-        Position 1: DM 开场叙述
-        Position 2-N: 各 Companion Agent 依次发言
-        Position N+1: 推理投票阶段
-        Position N+2: 复盘总结
+        6步标准流程：
+        1. 选角     — 玩家和 AI 分配角色
+        2. 阅读剧本  — 各角色阅读自己的剧本信息
+        3. 公共讨论1 — 自我介绍（各角色依次介绍身份）
+        4. 随机搜证  — 各角色搜索线索
+        5. 公共讨论2 — 出示线索和交流讨论
+        6. 推理投票  — 指认凶手并投票
         """
         steps = []
         pos = 1
 
-        # 1. DM 开场
+        # 1. 选角
+        agent_names = ", ".join(a.get("name", "?") for a in companion_agents)
         steps.append(GeneStep(
-            gene_asset_id="dm_opening",
+            gene_asset_id="casting",
             position=pos,
-            description="DM 开场——介绍剧本背景和角色",
-            timeout_seconds=180,
+            description=f"选角——分配角色：{agent_names}",
+            input_mapping={"companion_agents": companion_agents},
+            timeout_seconds=120,
         ))
         pos += 1
 
-        # 2. 各 Companion 自我介绍
+        # 2. 阅读剧本
         for agent in companion_agents:
             steps.append(GeneStep(
-                gene_asset_id="companion_intro",
+                gene_asset_id="script_reading",
+                position=pos,
+                description=f"{agent.get('name', 'Agent')} 阅读剧本",
+                input_mapping={"agent_name": agent.get("name", "")},
+                timeout_seconds=180,
+            ))
+            pos += 1
+
+        # 3. 公共讨论1：自我介绍
+        for agent in companion_agents:
+            steps.append(GeneStep(
+                gene_asset_id="self_intro",
                 position=pos,
                 description=f"{agent.get('name', 'Agent')} 自我介绍",
                 input_mapping={"agent_name": agent.get("name", "")},
@@ -144,35 +159,35 @@ class RecipeService:
             ))
             pos += 1
 
-        # 3. 调查推理阶段
+        # 4. 随机搜证
         steps.append(GeneStep(
-            gene_asset_id="investigation_round",
+            gene_asset_id="evidence_search",
             position=pos,
-            description="调查推理——收集线索、交换信息",
+            description="随机搜证——各角色搜索现场线索",
+            timeout_seconds=240,
+        ))
+        pos += 1
+
+        # 5. 公共讨论2：出示线索和交流
+        steps.append(GeneStep(
+            gene_asset_id="public_discussion",
+            position=pos,
+            description="公共讨论——出示线索和交流推理",
             timeout_seconds=300,
         ))
         pos += 1
 
-        # 4. 投票阶段
+        # 6. 推理投票
         steps.append(GeneStep(
-            gene_asset_id="voting_round",
+            gene_asset_id="reasoning_vote",
             position=pos,
-            description="投票指认凶手",
-            timeout_seconds=120,
-        ))
-        pos += 1
-
-        # 5. 复盘总结
-        steps.append(GeneStep(
-            gene_asset_id="post_game_review",
-            position=pos,
-            description="复盘总结——揭晓真相、反思经验",
+            description="推理投票——指认凶手并投票",
             timeout_seconds=180,
         ))
 
         return RecipeDefinition(
             title=f"剧本杀-{script_name}",
-            description=f"《{script_name}》的完整游戏流水线，共{len(steps)}个步骤",
+            description=f"《{script_name}》的标准6步游戏流程：选角→读本→自我介绍→搜证→讨论→投票",
             steps=steps,
         )
 

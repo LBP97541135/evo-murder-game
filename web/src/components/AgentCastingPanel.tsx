@@ -12,6 +12,18 @@ import {
   Title,
 } from "@mantine/core";
 
+// ============================
+// 角色立绘
+// ============================
+
+const characterPortraits: Record<string, string> = {
+  "周野": new URL("../Character/周野.png", import.meta.url).href,
+  "顾沉": new URL("../Character/顾沉.png", import.meta.url).href,
+  "沈禾": new URL("../Character/沈禾.png", import.meta.url).href,
+  "周岚": new URL("../Character/周岚.png", import.meta.url).href,
+  "秦野": new URL("../Character/秦野.png", import.meta.url).href,
+};
+
 type CastingAgent = {
   key: string;
   name: string;
@@ -205,16 +217,24 @@ export function AgentCastingPanel({
                     setAgentPickerOpen(true);
                   }}
                 >
-                  <Avatar
-                    size={52}
-                    radius="xl"
-                    color={isHuman ? "orange" : agent ? AVATAR_COLORS[agentKey.charCodeAt(0) % AVATAR_COLORS.length] : "gray"}
-                    className="round-table__role"
-                  >
-                    {roleName}
-                  </Avatar>
+                  {(() => {
+                    const rolePortrait = characterPortraits[roleName];
+                    const showPortrait = rolePortrait && (!agent || isHuman);
+                    return showPortrait ? (
+                      <Avatar src={rolePortrait} size={52} radius="xl" className="round-table__role" imageProps={{ style: { objectPosition: "top" } }} />
+                    ) : (
+                      <Avatar
+                        size={52}
+                        radius="xl"
+                        color={isHuman ? "orange" : agent ? AVATAR_COLORS[agentKey.charCodeAt(0) % AVATAR_COLORS.length] : "gray"}
+                        className="round-table__role"
+                      >
+                        {roleName}
+                      </Avatar>
+                    );
+                  })()}
                   <Text size="xs" ta="center" mt={4} lineClamp={1} c={isHuman ? "orange.3" : undefined}>
-                    {isHuman ? "我 · 真人玩家" : agent ? agent.name : "空位"}
+                    {isHuman ? "我 · 真人玩家" : agent ? agent.name : roleName}
                   </Text>
                 </Box>
               );
@@ -280,8 +300,18 @@ export function AgentCastingPanel({
           <Box className="game-casting-picker">
             <Paper radius="xl" p="lg" className="game-casting-role-detail">
               <Box className="game-casting-role-portrait">
-                <Text className="monospace-label" size="xs" c="dimmed">character portrait</Text>
-                <Text c="dimmed">角色立绘占位</Text>
+                {characterPortraits[roles[selectedSeat]?.role] ? (
+                  <img
+                    src={characterPortraits[roles[selectedSeat]?.role]}
+                    alt={roles[selectedSeat]?.role}
+                    style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", objectPosition: "top" }}
+                  />
+                ) : (
+                  <>
+                    <Text className="monospace-label" size="xs" c="dimmed">character portrait</Text>
+                    <Text c="dimmed">角色立绘占位</Text>
+                  </>
+                )}
               </Box>
               <Title order={2} mt="lg">{roles[selectedSeat]?.role}</Title>
               <Text fw={700} c="orange.3" mt={4}>{roles[selectedSeat]?.publicIdentity}</Text>

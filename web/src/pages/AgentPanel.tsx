@@ -274,23 +274,6 @@ const dmAgents: DMAgent[] = [
     oneliner: "第一次上桌或有较多新手的房间的首选",
     isFavorited: false,
   },
-  {
-    key: "shadow-weaver",
-    name: "影织者",
-    avatar: "",
-    vibe: "神秘、善于制造悬念",
-    pace: "慢",
-    focus: ["恐怖本", "悬疑本", "密室本"],
-    strengths: ["悬念营造", "节奏控制", "心理暗示"],
-    promptStyle: "多用暗示，逐步释放",
-    fairness: "线索释放精准，不破坏氛围",
-    rating: 4.7,
-    runs: "主持 132 局",
-    playTime: "晚8-12",
-    highlight: "悬念编织",
-    oneliner: "让每个剧本都像一部悬疑电影",
-    isFavorited: false,
-  },
 ];
 
 const ensembleTemplates: EnsembleTemplate[] = [
@@ -373,11 +356,11 @@ function AgentIDCard({
     <Box className="agent-id-card" onClick={onClick}>
       {/* 肖像区 */}
       <Box className="agent-id-card__portrait">
-        {agent.avatar ? (
+        {agentPortraits[agent.key] ? (
           <img
-            src={agent.avatar}
+            src={agentPortraits[agent.key]}
             alt={agent.name}
-            style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "center bottom" }}
+            style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "top" }}
           />
         ) : (
           <Stack align="center" justify="center" h="100%" gap="xs">
@@ -482,8 +465,8 @@ function AgentCarousel({
       style={
         portraitUrl
           ? {
-              backgroundImage: `linear-gradient(90deg, rgba(12,8,8,0.96) 0%, rgba(12,8,8,0.88) 42%, rgba(12,8,8,0.2) 100%), url(${portraitUrl})`,
-              backgroundPosition: "center, right center",
+              backgroundImage: `linear-gradient(90deg, rgba(12,8,8,0.94) 0%, rgba(12,8,8,0.55) 28%, rgba(12,8,8,0.0) 100%), url(${portraitUrl})`,
+              backgroundPosition: "center, 65% top",
               backgroundSize: "cover, auto 100%",
               backgroundRepeat: "no-repeat, no-repeat",
             }

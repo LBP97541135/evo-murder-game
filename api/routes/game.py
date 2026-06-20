@@ -164,6 +164,53 @@ async def post_game_reflection(session_id: str, game_result: dict):
 
 
 # ============================
+# 后剧情模式
+# ============================
+
+class PostGameRevealRequest(BaseModel):
+    """后剧情请求——投票后的真相交代。"""
+    killer: str = ""
+    motive: str = ""
+    voter: str = "player"
+    correct: bool = False
+    script_type: str = ""
+
+
+@router.post("/reveal/{session_id}")
+async def post_game_reveal(session_id: str, req: PostGameRevealRequest):
+    """投票后执行后剧情——凶手交代 + DM 揭晓真相。
+
+    自动调用 LLM 生成凶手交代和真相总结。
+    """
+    vote_result = {
+        "killer": req.killer,
+        "motive": req.motive,
+        "voter": req.voter,
+        "correct": req.correct,
+        "script_type": req.script_type,
+    }
+    result = orchestrator.post_game_reveal(session_id, vote_result)
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result)
+    return result
+
+
+@router.post("/reveal/{session_id}/spoiler")
+async def generate_spoiler_story(session_id: str, req: PostGameRevealRequest):
+    """投票后生成剧透故事——完整游戏剧情回顾。"""
+    vote_result = {
+        "killer": req.killer,
+        "motive": req.motive,
+        "voter": req.voter,
+        "correct": req.correct,
+    }
+    result = orchestrator.generate_spoiler_story(session_id, vote_result)
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result)
+    return result
+
+
+# ============================
 # Agent 游戏状态
 # ============================
 

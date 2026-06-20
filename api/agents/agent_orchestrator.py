@@ -194,6 +194,110 @@ class AgentNode:
         return self.client.memory_recall(signals=signals, limit=limit)
 
     # ============================
+    # DM 分级提示系统
+    # ============================
+
+    def generate_hint(self, level: int, context: dict = None) -> dict:
+        """DM 分级提示生成。
+
+        4级提示体系：
+        L1 - 提醒目标：提醒玩家当前应该做什么
+        L2 - 遗漏信息：提示玩家遗漏了什么线索
+        L3 - 推理方向：给出推理方向的暗示
+        L4 - 强提示：接近答案的强力提示
+
+        Args:
+            level: 1-4 提示等级
+            context: 游戏上下文（当前阶段、已发现线索、讨论内容等）
+        Returns:
+            {"level": int, "hint": str, "level_name": str}
+        """
+        if self.role != AgentRole.DM:
+            return {"error": "only_dm_can_generate_hints"}
+
+        level = max(1, min(4, level))
+        level_names = {1: "提醒目标", 2: "遗漏信息", 3: "推理方向", 4: "强提示"}
+        level_name = level_names[level]
+
+        # 构建提示生成上下文
+        ctx = context or {}
+        phase = ctx.get("phase", "unknown")
+        discussion_summary = ctx.get("discussion_summary", "")
+        found_clues = ctx.get("found_clues", [])
+        missed_clues = ctx.get("missed_clues", [])
+        suspects = ctx.get("suspects", [])
+
+        # 各等级的提示指令
+        level_instructions = {
+            1: (
+                "你正在使用 L1（提醒目标）提示。\n"
+                "请用温和、引导的语气，提醒玩家当前游戏阶段的目标是什么。\n"
+                "不要透露任何具体信息，只提醒方向。\n"
+                "例如：'现在是调查阶段，大家注意观察每个人的时间线。'"
+            ),
+            2: (
+                "你正在使用 L2（遗漏信息）提示。\n"
+                "玩家可能遗漏了一些重要线索。请提醒他们关注某类信息。\n"
+                "不要直接说线索内容，而是提示他们去注意某个方向。\n"
+                "例如：'有没有人注意到案发现场的某个细节？'"
+            ),
+            3: (
+                "你正在使用 L3（推理方向）提示。\n"
+                "请给出更具体的推理方向建议，引导玩家关联已有线索。\n"
+                "可以暗示线索之间的关系，但不要直接说出结论。\n"
+                "例如：'凶手的手段和某个角色的专业背景似乎有关联。'"
+            ),
+            4: (
+                "你正在使用 L4（强提示）提示。\n"
+                "玩家陷入了僵局，需要强有力的引导。\n"
+                "可以接近答案，但不要直接说出凶手名字或作案手法。\n"
+                "例如：'注意看时间线——有人的不在场证明是有漏洞的。'"
+            ),
+        }
+
+        prompt = (
+            f"你是剧本杀DM「{self.name}」。\n"
+            f"当前阶段：{phase}\n"
+            f"讨论摘要：{discussion_summary or '暂无'}\n"
+            f"已发现线索：{', '.join(found_clues) if found_clues else '暂无'}\n"
+            f"遗漏线索：{', '.join(missed_clues) if missed_clues else '未知'}\n"
+            f"嫌疑人：{', '.join(suspects) if suspects else '未知'}\n\n"
+            f"{level_instructions[level]}\n\n"
+            "请根据以上上下文，生成一句符合等级的提示。"
+            "保持主持人中立、引导的语气。"
+        )
+
+        try:
+            from api.llm.llm_service import respond_initial
+            hint = respond_initial(
+                system_prompt=(
+                    "你是剧本杀DM，擅长用分级提示引导玩家。"
+                    "你的原则：绝不直接泄露答案，逐步引导玩家自己发现真相。"
+                ),
+                user_message=prompt,
+                temperature=0.7,
+                max_tokens=200,
+            )
+            return {
+                "level": level,
+                "level_name": level_name,
+                "hint": hint.strip(),
+                "context": {
+                    "phase": phase,
+                    "found_clues_count": len(found_clues),
+                    "missed_clues_count": len(missed_clues),
+                },
+            }
+        except Exception as e:
+            logger.warning(f"Hint generation failed: {e}")
+            return {
+                "level": level,
+                "level_name": level_name,
+                "hint": f"[系统] DM提示：请关注当前阶段目标。",
+                "fallback": True,
+            }
+
+    # ============================
     # 本地胶囊加载（从数据库）
     # ============================
 
@@ -549,6 +653,21 @@ class AgentOrchestrator:
             session_id=session_id, msg_type=msg_type, payload=payload,
         )
 
+    def dm_generate_hint(self, level: int = 1, context: dict = None) -> dict:
+        """让 DM Agent 生成分级提示。
+
+        Args:
+            level: 1-4
+            context: 游戏上下文
+        Returns:
+            {"success": bool, "hint": dict, ...}
+        """
+        dm = self._find_agent_by_role(AgentRole.DM)
+        if not dm:
+            return {"success": False, "error": "no_dm_agent"}
+        hint = dm.generate_hint(level, context)
+        return {"success": True, "hint": hint}
+
     def send_direct_message(self, session_id: str, msg_type: str,
                             payload: dict, from_key: str, to_key: str) -> dict:
         """定向消息：从 Agent A 发送到 Agent B。"""
@@ -561,24 +680,167 @@ class AgentOrchestrator:
             to_node_id=to_agent.node_id,
         )
 
+    # ============================
+    # 后剧情模式
+    # ============================
+
+    def post_game_reveal(self, session_id: str, vote_result: dict) -> dict:
+        """投票后的后剧情处理——凶手交代真相。
+
+        流程：
+        1. 确定凶手和投票结果
+        2. 重写凶手的 context，强制凶手交代作案过程和动机
+        3. DM 揭晓完整真相
+        4. 返回真相文本供前端展示
+
+        Args:
+            session_id: 游戏 Session ID
+            vote_result: 投票结果 {"killer": str, "motive": str,
+                                    "voter": str, "correct": bool, ...}
+        Returns:
+            {"success": bool, "killer_confession": str, "truth": str,
+             "vote_correct": bool, "session_id": str}
+        """
+        # 找到凶手 Agent 和 DM
+        accused_killer = vote_result.get("killer", "")
+        is_correct = vote_result.get("correct", False)
+        script_name = self.sessions.get(session_id, {}).get("script_name", "未知剧本")
+
+        killer_agent = None
+        dm_agent = self._find_agent_by_role(AgentRole.DM)
+
+        for key, agent in self.agents.items():
+            if agent.role == AgentRole.COMPANION and agent.registered:
+                # 通过剧本角色名匹配凶手
+                if agent.name == accused_killer or agent.persona_key == accused_killer:
+                    killer_agent = agent
+                    break
+
+        # 生成凶手交代（LLM）
+        killer_confession = ""
+        if killer_agent:
+            try:
+                from api.llm.llm_service import respond_initial
+                prompt = (
+                    f"你是{accused_killer}。你被指认是凶手。\n"
+                    "你的角色秘密被揭穿了。现在你必须坦白一切。\n"
+                    f"投票结果：{'✓ 正确' if is_correct else '✗ 错误判断'}\n\n"
+                    "请以角色身份，用第一人称写一段交代（150-300字）：\n"
+                    "1. 承认罪行（或否认，如果选错了人）\n"
+                    "2. 交代作案动机和手法\n"
+                    f"3. 说出整件事件的真相\n"
+                    "语气要贴合你的角色性格——懊悔、挑衅、悲伤或其他。"
+                )
+                confession = respond_initial(
+                    system_prompt=(
+                        "你是剧本杀中的角色，你的秘密被揭穿了。"
+                        "你必须以角色身份交代真相。"
+                    ),
+                    user_message=prompt,
+                    temperature=0.8,
+                    max_tokens=500,
+                )
+                killer_confession = confession.strip()
+            except Exception as e:
+                logger.error(f"生成凶手交代失败: {e}")
+                killer_confession = f"[{accused_killer}的交代：系统生成失败]"
+
+        # 生成 DM 真相揭晓
+        truth = ""
+        if dm_agent:
+            try:
+                from api.llm.llm_service import respond_initial
+                truth_prompt = (
+                    f"你是剧本杀DM「{dm_agent.name}」。\n"
+                    f"剧本《{script_name}》的推理环节已结束。\n"
+                    f"被指认的凶手：{accused_killer}\n"
+                    f"投票是否正确：{'是' if is_correct else '否'}\n\n"
+                    "请作为DM宣布案件真相，总结整个故事。\n"
+                    "100-200字，包括案件复盘和真相解释。"
+                )
+                truth_text = respond_initial(
+                    system_prompt="你是剧本杀DM，擅长复盘总结。语气庄重、公正。",
+                    user_message=truth_prompt,
+                    temperature=0.7,
+                    max_tokens=400,
+                )
+                truth = truth_text.strip()
+            except Exception as e:
+                logger.error(f"生成DM真相揭晓失败: {e}")
+                truth = f"[系统] 真相：凶手是{accused_killer}，本案真相待DM补充。"
+
+        return {
+            "success": True,
+            "killer_confession": killer_confession,
+            "truth": truth,
+            "vote_correct": is_correct,
+            "accused_killer": accused_killer,
+            "session_id": session_id,
+        }
+
+    def generate_spoiler_story(self, session_id: str, vote_result: dict) -> dict:
+        """生成剧透故事——完整游戏剧情回顾。
+
+        投票后生成完整的游戏回顾，包含角色关系、真相、结局。
+        """
+        script_name = self.sessions.get(session_id, {}).get("script_name", "未知剧本")
+        accused = vote_result.get("killer", "未知")
+        correct = vote_result.get("correct", False)
+
+        # 收集本局参与的 Agent 信息
+        agents_info = []
+        for key, agent in self.agents.items():
+            if agent.role == AgentRole.COMPANION and agent.registered:
+                agents_info.append(f"{agent.name}({agent.persona_key or '未知角色'})")
+
+        try:
+            from api.llm.llm_service import respond_initial
+            prompt = (
+                f"请为剧本杀《{script_name}》生成一份完整的剧透故事。\n"
+                f"参与者：{', '.join(agents_info)}\n"
+                f"被指认的凶手：{accused}\n"
+                f"指认是否正确：{'正确' if correct else '错误'}\n\n"
+                "包含以下内容（200-400字）：\n"
+                "1. 故事背景和角色关系\n"
+                "2. 案件真相和作案手法\n"
+                "3. 各角色的结局\n"
+                "4. 游戏总结\n"
+                "语气：小说式的叙事风格。"
+            )
+            story = respond_initial(
+                system_prompt="你是剧本杀故事作者，擅长写引人入胜的剧透故事。",
+                user_message=prompt,
+                temperature=0.8,
+                max_tokens=800,
+            )
+            return {
+                "success": True,
+                "story": story.strip(),
+                "script_name": script_name,
+                "session_id": session_id,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     def post_game_reflection(self, session_id: str, game_result: dict) -> list:
-        """游戏结束后，所有 Agent 执行自评并记录经验。"""
+        """游戏结束后，所有 Agent 执行自评并记录经验。
+        使用 LLM 生成自评摘要，并自动触发 constitution 进化。"""
         results = []
         for key, agent in self.agents.items():
             if not agent.registered or agent.role == AgentRole.ASSISTANT:
                 continue
 
-            # Companion Agent 自评
             if agent.role == AgentRole.COMPANION:
                 signals = [
                     "role-playing", "inference", "user-interaction",
                     game_result.get("script_type", "unknown"),
                 ]
-                summary = (
-                    f"角色扮演评分:{game_result.get('role_score', 0):.1f} "
-                    f"推理评分:{game_result.get('inference_score', 0):.1f} "
-                    f"互动评分:{game_result.get('interaction_score', 0):.1f}"
-                )
+                scores = {
+                    "角色扮演": game_result.get("role_score", 0),
+                    "推理": game_result.get("inference_score", 0),
+                    "互动": game_result.get("interaction_score", 0),
+                }
+                summary = self._llm_reflection_summary(agent, scores, game_result)
                 result = agent.record_experience(
                     signals=signals,
                     gene_id=f"game_{session_id}",
@@ -588,16 +850,16 @@ class AgentOrchestrator:
                 )
                 results.append({"agent": key, "reflection": result})
 
-            # DM Agent 自评
             elif agent.role == AgentRole.DM:
                 signals = [
                     "hosting", "pacing", "hint-management",
                     game_result.get("script_type", "unknown"),
                 ]
-                summary = (
-                    f"控场评分:{game_result.get('hosting_score', 0):.1f} "
-                    f"节奏评分:{game_result.get('pacing_score', 0):.1f}"
-                )
+                scores = {
+                    "控场": game_result.get("hosting_score", 0),
+                    "节奏": game_result.get("pacing_score", 0),
+                }
+                summary = self._llm_reflection_summary(agent, scores, game_result)
                 result = agent.record_experience(
                     signals=signals,
                     gene_id=f"dm_{session_id}",
@@ -607,7 +869,107 @@ class AgentOrchestrator:
                 )
                 results.append({"agent": key, "reflection": result})
 
+            # ========== 自动进化：LLM 改写 constitution ==========
+            old_constitution = agent.constitution
+            new_constitution = self._llm_evolve_constitution(agent, game_result)
+            if new_constitution and new_constitution != old_constitution:
+                agent.constitution = new_constitution
+                self._save_agent_to_db(agent, key)
+                self._save_evolution_record(key, agent, session_id, old_constitution, new_constitution)
+                results[-1]["constitution_evolved"] = True
+                results[-1]["old_constitution"] = old_constitution[:100]
+                results[-1]["new_constitution"] = new_constitution[:100]
+                logger.info(f"Agent [{key}] constitution 自动进化完成")
+
         return results
+
+    def _llm_reflection_summary(self, agent: "AgentNode",
+                                 scores: dict, game_result: dict) -> str:
+        """用 LLM 生成局后自评摘要。"""
+        scores_str = ", ".join(f"{k}={v:.1f}" for k, v in scores.items())
+        role_label = "DM主持人" if agent.role == AgentRole.DM else "角色扮演(陪玩Agent)"
+        prompt = (
+            f"你是{role_label}「{agent.name}」。\n"
+            f"你刚刚完成了一局剧本杀游戏。\n"
+            f"评分：{scores_str}\n"
+            f"剧本类型：{game_result.get('script_type', '未知')}\n"
+            "请以第一人称写一段简短的自评反思（50-100字），包括：\n"
+            "1. 做得好的地方 2. 可改进的地方 3. 学到了什么"
+        )
+        try:
+            from api.llm.llm_service import respond_initial
+            reflection = respond_initial(
+                system_prompt="你是一个能自我反思的AI Agent，请写一段诚恳有建设性的自评。",
+                user_message=prompt,
+                temperature=0.7, max_tokens=300,
+            )
+            return reflection.strip()
+        except Exception as e:
+            logger.warning(f"LLM reflection failed for {agent.name}: {e}")
+            return f"自评：{scores_str}"
+
+    def _llm_evolve_constitution(self, agent: "AgentNode", game_result: dict) -> str:
+        """用 LLM 基于游戏表现生成改进后的 constitution。"""
+        score_text = (
+            f"整体评分={game_result.get('overall_score', 0):.1f}, "
+            f"角色扮演={game_result.get('role_score', 0):.1f}, "
+            f"推理={game_result.get('inference_score', 0):.1f}"
+        ) if game_result else "暂无评分"
+
+        prompt = (
+            f"你是AI Agent「{agent.name}」，角色类型：{agent.role.value}。\n\n"
+            f"你当前的 behavior constitution：\n{agent.constitution}\n\n"
+            f"本局表现：{score_text}\n\n"
+            "请根据本局表现，分析优缺点，生成一份**改进后的行为宪章**。\n"
+            "新宪章应保留有效原则，加入从经验中学到的新策略。\n"
+            "请按格式回复：\n"
+            "【新宪章】\n...(宪章内容，100-200字)"
+        )
+        try:
+            from api.llm.llm_service import respond_initial
+            result = respond_initial(
+                system_prompt="你是一个能自我进化、反思并改进行为规则的AI Agent。",
+                user_message=prompt,
+                temperature=0.7, max_tokens=500,
+            )
+            # 解析 【新宪章】 后的内容
+            if "【新宪章】" in result:
+                new_c = result.split("【新宪章】", 1)[1].strip()
+                return new_c
+            return result.strip()[:300]
+        except Exception as e:
+            logger.warning(f"Constitution evolution failed for {agent.name}: {e}")
+            return ""
+
+    def _save_evolution_record(self, agent_key: str, agent: "AgentNode",
+                                session_id: str, old_content: str, new_content: str) -> None:
+        """将 constitution 进化记录保存到数据库。"""
+        try:
+            from api.db.models import get_session, AgentNode as AgentNodeModel, EvolutionRecord
+            db_session = get_session()
+            try:
+                db_agent = db_session.query(AgentNodeModel).filter(
+                    AgentNodeModel.node_id == agent.node_id
+                ).first()
+                if db_agent:
+                    record = EvolutionRecord(
+                        id=f"er_{uuid.uuid4().hex[:8]}",
+                        agent_node_id=db_agent.id,
+                        session_id=session_id,
+                        signals=agent.domains,
+                        status="evolved",
+                        score=0.0,
+                        summary="局后自动进化：constitution 改写",
+                        update_type="constitution",
+                        old_content=old_content,
+                        new_content=new_content,
+                    )
+                    db_session.add(record)
+                    db_session.commit()
+            finally:
+                db_session.close()
+        except Exception as e:
+            logger.error(f"保存进化记录失败: {e}")
 
     def load_all_agent_capsules(self, min_score: float = 0.3,
                                 limit: int = 5) -> dict[str, dict]:

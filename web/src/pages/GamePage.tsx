@@ -48,6 +48,7 @@ import {
   SCRIPT_CHAPTERS,
   SEARCH_EVIDENCE,
 } from "./gameMockData";
+import { AgentCastingPanel } from "../components/AgentCastingPanel";
 import { StudioShell } from "./StudioShell";
 
 const scriptMap: Record<string, string> = {
@@ -100,7 +101,7 @@ function GamePage() {
 
   const [phaseIndex, setPhaseIndex] = React.useState(0);
   const phase = GAME_PHASES[phaseIndex];
-  const [selectedRole, setSelectedRole] = React.useState("user");
+  const [selectedRole, setSelectedRole] = React.useState("");
   const [roleConfirmed, setRoleConfirmed] = React.useState(false);
   const [chapter, setChapter] = React.useState(0);
   const [readingDone, setReadingDone] = React.useState(false);
@@ -134,13 +135,14 @@ function GamePage() {
   const [activeThreadId, setActiveThreadId] = React.useState(PRIVATE_THREADS[0].id);
   const [privateMessage, setPrivateMessage] = React.useState("");
   const [publicMessage, setPublicMessage] = React.useState("");
-  const [feedback, setFeedback] = React.useState("欢迎进入游戏，请从选角开始体验完整流程。");
+  const [feedback, setFeedback] = React.useState("欢迎进入游戏，请点击圆桌席位选择你喜欢的角色");
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [speakerSeconds, setSpeakerSeconds] = React.useState(90);
   const [voteSuspect, setVoteSuspect] = React.useState("");
   const [voteReason, setVoteReason] = React.useState("");
   const [voteEvidence, setVoteEvidence] = React.useState<string[]>([]);
   const [voteSubmitted, setVoteSubmitted] = React.useState(false);
+  const [introSpotlight, setIntroSpotlight] = React.useState<(typeof GAME_PLAYERS)[number] | null>(null);
 
   React.useEffect(() => {
     const timer = window.setInterval(() => {
@@ -238,9 +240,11 @@ function GamePage() {
   const completeIntro = () => {
     if (!currentIntroId) return;
     const introPlayer = playerById(currentIntroId);
+    if (!introPlayer) return;
     setIntroduced((items) => [...items, currentIntroId]);
-    addEvent({ type: "speech", speaker: introPlayer?.name || "", text: INTRO_LINES[currentIntroId], tone: introPlayer?.color || "gray" });
-    showFeedback(`${introPlayer?.name} 已完成自我介绍。`);
+    addEvent({ type: "speech", speaker: introPlayer.name, text: INTRO_LINES[currentIntroId], tone: introPlayer.color || "gray" });
+    setIntroSpotlight(introPlayer);
+    showFeedback(`${introPlayer.name} 已完成自我介绍。`);
   };
 
   const randomSearch = () => {
@@ -427,28 +431,21 @@ function GamePage() {
       return (
         <Stack gap="md">
           <Group justify="space-between"><Box><Title order={3}>选择你的角色</Title><Text c="dimmed">查看公开身份与标签，确认后进入剧本阅读。</Text></Box><Badge>{roleConfirmed ? "已确认" : "待确认"}</Badge></Group>
-          <Box className="game-role-grid">
-            {ROLE_OPTIONS.map((role) => (
-              <Paper key={role.id} radius="xl" p="md" className={selectedRole === role.id ? "game-role-card is-selected" : "game-role-card"}>
-                <Group justify="space-between"><Avatar color={role.color}>{role.role.slice(0, 1)}</Avatar>{role.agent && <Badge color="blue">Agent</Badge>}</Group>
-                <Text fw={900} mt="sm">{role.role}</Text><Text size="sm" c="dimmed">{role.publicIdentity}</Text>
-                <Group gap={5} mt="sm">{role.tags.map((tag) => <Badge key={tag} size="xs" variant="light" color="gray">{tag}</Badge>)}</Group>
-                <Text size="sm" mt="sm" lineClamp={3}>{role.background}</Text>
-                <Button fullWidth mt="md" radius="xl" variant={selectedRole === role.id ? "filled" : "light"} disabled={roleConfirmed || Boolean(role.selectedBy && role.id !== selectedRole)} onClick={() => setSelectedRole(role.id)}>
-                  {role.selectedBy && role.id !== selectedRole ? `已由 ${role.selectedBy} 选择` : selectedRole === role.id ? "当前选择" : "选择角色"}
-                </Button>
-              </Paper>
-            ))}
-          </Box>
+          <AgentCastingPanel
+            roles={ROLE_OPTIONS}
+            selectedPlayerRoleId={selectedRole}
+            onPlayerRoleChange={setSelectedRole}
+          />
           <Button
             radius="xl"
+            disabled={!selectedRole}
             onClick={() => {
               setRoleConfirmed(true);
               setPhaseIndex(1);
               showFeedback("角色已确认并锁定，已进入阅读剧本阶段。");
             }}
           >
-            确认选角并进入剧本
+            {selectedRole ? "确认阵容并进入剧本" : "请先在圆桌中选择自己扮演的角色"}
           </Button>
         </Stack>
       );
@@ -504,7 +501,7 @@ function GamePage() {
             {introPlayer && <Text mt="md" c="dimmed">本阶段仅允许自我介绍和指定 Agent 自我介绍，不可出示证物、搜证或深入私聊。</Text>}
           </Paper>
           <Stack gap="xs">{events.filter((event) => event.type === "speech" && INTRO_LINES && Object.values(INTRO_LINES).includes(event.text)).map(renderEvent)}</Stack>
-          {introPlayer && <Button onClick={completeIntro}>{introPlayer.id === "user" ? "完成我的自我介绍" : `模拟 ${introPlayer.name} 完成介绍`}</Button>}
+          {introPlayer && <Button onClick={completeIntro}>{introPlayer.id === "user" ? "发言" : "下一位"}</Button>}
         </Stack>
       );
     }
@@ -528,7 +525,29 @@ function GamePage() {
             <Paper radius="xl" p="xl" className="game-vote-success"><IconCheck size={44} /><Title order={2} mt="md">投票已提交</Title><Text c="dimmed" mt="sm">等待其他玩家与 Agent 完成独立推理。</Text></Paper>
           ) : (
             <Paper radius="xl" p="lg" className="game-vote-form">
-              <Select label="选择嫌疑人" value={voteSuspect} onChange={(value) => setVoteSuspect(value || "")} data={GAME_PLAYERS.filter((player) => !player.agent && player.id !== "user").map((player) => ({ value: player.id, label: `${player.role} · ${player.name}` }))} />
+              <Text fw={700}>选择嫌疑人</Text>
+              <Radio.Group value={voteSuspect} onChange={setVoteSuspect}>
+                <Box className="game-suspect-grid" mt="xs">
+                  {GAME_PLAYERS.filter((player) => !player.agent && player.id !== "user").map((player) => (
+                    <Paper
+                      key={player.id}
+                      component="label"
+                      radius="lg"
+                      p="sm"
+                      className={voteSuspect === player.id ? "game-suspect-option is-selected" : "game-suspect-option"}
+                    >
+                      <Group wrap="nowrap">
+                        <Avatar color={player.color}>{player.role.slice(0, 1)}</Avatar>
+                        <Box style={{ flex: 1 }}>
+                          <Text fw={900}>{player.role}</Text>
+                          <Text size="xs" c="dimmed">{player.name}</Text>
+                        </Box>
+                        <Radio value={player.id} aria-label={`选择 ${player.role}`} />
+                      </Group>
+                    </Paper>
+                  ))}
+                </Box>
+              </Radio.Group>
               <Textarea label="推理理由" mt="md" minRows={5} value={voteReason} onChange={(event) => setVoteReason(event.currentTarget.value)} />
               <Text fw={700} mt="md">选择关键证物</Text>
               <Checkbox.Group value={voteEvidence} onChange={setVoteEvidence}><Stack gap="xs" mt="xs">{evidence.map((item) => <Checkbox key={item.id} value={item.id} label={item.name} />)}</Stack></Checkbox.Group>
@@ -610,7 +629,7 @@ function GamePage() {
         </Tabs.Panel>
         <Tabs.Panel value="tasks" pt="md"><Stack gap="sm">{[{ label: "主线任务", text: "找到原始门禁记录", done: evidence.some((item) => item.id === "duty-sheet") }, { label: "隐藏任务", text: "避免过早暴露数据删除交易", done: false }, { label: "阶段任务", text: phase.id === "search" ? "完成两次搜证" : "推进当前游戏阶段", done: phase.id === "search" && searchesLeft === 0 }].map((task) => <Paper key={task.label} p="sm" radius="lg" className="game-clue-item"><Group justify="space-between"><Text fw={800}>{task.label}</Text><Badge color={task.done ? "teal" : "gray"}>{task.done ? "已完成" : "进行中"}</Badge></Group><Text size="sm" c="dimmed" mt={5}>{task.text}</Text></Paper>)}</Stack></Tabs.Panel>
         <Tabs.Panel value="evidence" pt="md"><Stack gap="sm">{evidence.map((item) => <Paper key={item.id} p="sm" radius="lg" className="game-clue-item"><Group justify="space-between"><Text fw={800}>{item.name}</Text><Badge size="xs">{item.visibility}</Badge></Group><Text size="sm" c="dimmed" mt={5}>{item.description}</Text><Text size="xs" mt="sm">获得方式：{item.source}</Text><Button size="xs" mt="sm" variant="light" disabled={!isUserSpeaking || phase.id !== "discussion"} onClick={() => { setSelectedEvidenceId(item.id); setDialog("evidence"); }}>出示证物</Button></Paper>)}</Stack></Tabs.Panel>
-        <Tabs.Panel value="private" pt="md"><Group gap="xs" mb="sm">{privateThreads.map((thread) => <Button key={thread.id} size="xs" variant={thread.id === activeThreadId ? "filled" : "light"} onClick={() => { setActiveThreadId(thread.id); setPrivateThreads((items) => items.map((item) => item.id === thread.id ? { ...item, unread: 0 } : item)); }}>{thread.name}{thread.unread > 0 && ` (${thread.unread})`}</Button>)}</Group>{activeThread ? <Stack gap="sm"><Group justify="space-between"><Text fw={900}>{activeThread.name}</Text><Button size="xs" variant="subtle" color="red" onClick={() => setPrivateThreads((items) => items.filter((item) => item.id !== activeThread.id))}>结束私聊</Button></Group><Stack gap="xs">{activeThread.messages.map((text, index) => <Paper key={index} p="sm" radius="lg" className="game-private-chat"><Text size="sm">{text}</Text></Paper>)}</Stack><TextInput value={privateMessage} onChange={(event) => setPrivateMessage(event.currentTarget.value)} placeholder="输入私聊内容…" rightSection={<ActionIcon onClick={sendPrivateMessage}><IconSend size={15} /></ActionIcon>} /></Stack> : <Text c="dimmed">暂无私聊会话。</Text>}</Tabs.Panel>
+        <Tabs.Panel value="private" pt="md"><Group gap="xs" mb="sm">{privateThreads.map((thread) => <Button key={thread.id} size="xs" variant={thread.id === activeThreadId ? "filled" : "light"} onClick={() => { setActiveThreadId(thread.id); setPrivateThreads((items) => items.map((item) => item.id === thread.id ? { ...item, unread: 0 } : item)); }}>{thread.name}{thread.unread > 0 && ` (${thread.unread})`}</Button>)}</Group>{activeThread ? <Stack gap="sm"><Text fw={900}>{activeThread.name}</Text><Stack gap="xs">{activeThread.messages.map((text, index) => <Paper key={index} p="sm" radius="lg" className="game-private-chat"><Text size="sm">{text}</Text></Paper>)}</Stack><TextInput value={privateMessage} onChange={(event) => setPrivateMessage(event.currentTarget.value)} placeholder="输入私聊内容…" rightSection={<ActionIcon onClick={sendPrivateMessage}><IconSend size={15} /></ActionIcon>} /></Stack> : <Text c="dimmed">暂无私聊会话。</Text>}</Tabs.Panel>
       </ScrollArea>
     </Tabs>
   );
@@ -645,18 +664,26 @@ function GamePage() {
                   <Group gap="sm"><Title order={3}>{scriptTitle}</Title><Badge>{gameMode}</Badge></Group>
                 </Box>
                 <Divider orientation="vertical" visibleFrom="md" />
-                <Paper className="game-dm-header-card" radius="lg" px="sm" py={6} visibleFrom="md">
-                  <Group gap="xs" wrap="nowrap">
-                    <Avatar size="sm" color={dm?.color || "red"}>{dm?.name.slice(0, 1)}</Avatar>
-                    <Box>
-                      <Group gap={5}>
-                        <Text size="xs" fw={900}>DM · {dm?.role}</Text>
-                        <Badge size="xs" color="red" variant="light">Agent</Badge>
-                      </Group>
-                      <Text size="xs" c="dimmed">{dm?.name} · 主持中</Text>
-                    </Box>
-                  </Group>
-                </Paper>
+                <Box className="game-dm-anchor">
+                  <Paper className="game-dm-header-card" radius="lg" px="sm" py={6}>
+                    <Group gap="xs" wrap="nowrap">
+                      <Avatar size="sm" color={dm?.color || "red"}>{dm?.name.slice(0, 1)}</Avatar>
+                      <Box className="game-dm-header-copy">
+                        <Group gap={5}>
+                          <Text size="xs" fw={900}>DM · {dm?.role}</Text>
+                          <Badge size="xs" color="red" variant="light">AI</Badge>
+                        </Group>
+                        <Text size="xs" c="dimmed">{dm?.name} · 主持中</Text>
+                        
+                      </Box> |
+                      {feedback && (
+                          <Text size="s" className="game-dm-progress">
+                            {feedback}
+                          </Text>
+                        )}
+                    </Group>
+                  </Paper>
+                </Box>
                 <Box visibleFrom="sm">
                   <Text size="xs" c="dimmed">当前发言 / 下一位</Text>
                   <Text fw={800}>{current?.role || "暂无"} → {playerById(queue.find((item) => item !== currentSpeaker) || null)?.role || "等待申请"}</Text>
@@ -679,8 +706,6 @@ function GamePage() {
               </Group>
             </Paper>
           )}
-
-          {feedback && <Paper className="game-feedback" radius="md" px="md" py={6}><Group justify="space-between"><Text size="sm">{feedback}</Text><ActionIcon size="xs" variant="subtle" onClick={() => setFeedback("")}><IconX size={13} /></ActionIcon></Group></Paper>}
 
           <main className="game-workspace__body game-workspace__body--phased">
             <aside className="game-side-panel game-people-panel">
@@ -714,7 +739,7 @@ function GamePage() {
                   })}
                 </Stack>
               </ScrollArea>
-              {selectedPlayer && selectedPlayer.id !== "dm" && <Paper p="sm" radius="lg" className="game-player-actions"><Text fw={800}>{selectedPlayer.role} · 快捷操作</Text><Group gap={5} mt="sm"><Button size="xs" variant="light" onClick={() => showFeedback(`${selectedPlayer.role} 的公开身份：${selectedPlayer.publicIdentity}`)}>公开信息</Button>{selectedPlayer.id !== "user" && <Button size="xs" variant="light" onClick={() => { setTargetId(selectedPlayer.id); setDialog("private"); }}>发起私聊</Button>}{selectedPlayer.agent && <Button size="xs" variant="light" disabled={!isUserSpeaking} onClick={() => { setTargetId(selectedPlayer.id); setDialog("force"); }}>指定回答</Button>}</Group></Paper>}
+              {selectedPlayer && selectedPlayer.id !== "dm" && <Paper p="sm" radius="lg" className="game-player-actions"><Group justify="space-between"><Text fw={800}>{selectedPlayer.role} · 快捷操作</Text><Badge color={selectedPlayer.agent ? "blue" : "orange"} variant="light">{selectedPlayer.agent ? "AI 玩家" : "真人玩家"}</Badge></Group><Group gap={5} mt="sm"><Button size="xs" variant="light" onClick={() => showFeedback(`${selectedPlayer.role} 的公开身份：${selectedPlayer.publicIdentity}`)}>公开信息</Button>{selectedPlayer.id !== "user" && <Button size="xs" variant="light" onClick={() => { setTargetId(selectedPlayer.id); setDialog("private"); }}>发起私聊</Button>}{selectedPlayer.agent && <Button size="xs" variant="light" disabled={!isUserSpeaking} onClick={() => { setTargetId(selectedPlayer.id); setDialog("force"); }}>指定回答</Button>}</Group></Paper>}
             </aside>
 
             <section className="game-core-panel"><ScrollArea className="game-core-scroll" offsetScrollbars>{renderStage()}</ScrollArea></section>
@@ -794,6 +819,34 @@ function GamePage() {
           )}
         </Stack>
       </Modal>
+      {introSpotlight && (
+        <Box
+          className="game-intro-spotlight"
+          role="button"
+          tabIndex={0}
+          aria-label="关闭角色自我介绍"
+          onClick={() => setIntroSpotlight(null)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") setIntroSpotlight(null);
+          }}
+        >
+          <Box className="game-intro-portrait" aria-hidden="true">
+            <Text className="monospace-label" size="xs" c="dimmed">character portrait</Text>
+            <Text c="dimmed">角色立绘占位</Text>
+          </Box>
+          <Paper className="game-intro-speech" radius="xl" p="lg">
+            <Group gap="sm">
+              <Avatar color={introSpotlight.color}>{introSpotlight.role.slice(0, 1)}</Avatar>
+              <Box>
+                <Title order={3}>{introSpotlight.role}</Title>
+                <Text size="sm" c="dimmed">{introSpotlight.name} · {introSpotlight.agent ? "AI 玩家" : "真人玩家"}</Text>
+              </Box>
+            </Group>
+            <Text fz="lg" lh={1.8} mt="md">“{INTRO_LINES[introSpotlight.id]}”</Text>
+            <Text size="xs" c="dimmed" ta="center" mt="md">点击任意位置继续</Text>
+          </Paper>
+        </Box>
+      )}
     </StudioShell>
   );
 }

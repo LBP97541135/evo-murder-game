@@ -1,8 +1,8 @@
 /**
  * EvoMap Murder Game - Agent Panel
  *
- * Agent 广场：陪玩Agent / DM Agent / Agent阵容搭配 三大分类。
- * 横向无边框标签切换，每个分类拥有独立的筛选、搜索、轮播与展示区域。
+ * Agent 广场：陪玩 Agent / DM Agent 两大分类。
+ * 智能阵容与选角能力已迁移至游戏主面板的选角阶段。
  */
 
 import React from "react";
@@ -724,7 +724,6 @@ function AgentPanel() {
         {([
           { key: "playmate" as const, label: "陪玩 Agent" },
           { key: "dm" as const, label: "DM Agent" },
-          { key: "ensemble" as const, label: "Agent 阵容搭配" },
         ]).map((tab) => (
           <Box
             key={tab.key}
@@ -1423,13 +1422,13 @@ function AgentPanel() {
   return (
     <StudioShell
       title="Agent 广场"
-      subtitle="陪玩 Agent、DM Agent 与 Agent 阵容搭配三大模块：从性格、主动程度、擅长剧本到主持节奏，全方位匹配你的游戏需求。"
-      eyebrow="agents / dm / ensemble"
+      subtitle="从性格、主动程度、擅长剧本到主持节奏，分别匹配陪玩 Agent 与 DM Agent。智能阵容搭配已移至游戏选角阶段。"
+      eyebrow="agents / dm"
       stats={[
         { label: "陪玩 Agent", value: `${companionAgents.length}` },
         { label: "DM Agent", value: `${dmAgents.length}` },
-        { label: "阵容模板", value: `${ensembleTemplates.length}` },
         { label: "总收藏", value: `${playmateFavorites.size + dmFavorites.size}` },
+        { label: "智能选角", value: "游戏内配置" },
       ]}
     >
       <Stack gap="xl">
@@ -1439,7 +1438,6 @@ function AgentPanel() {
         {/* 内容区域 */}
         {activeTab === "playmate" && renderPlaymateView()}
         {activeTab === "dm" && renderDMView()}
-        {activeTab === "ensemble" && renderEnsembleView()}
 
         {/* 详情弹窗 */}
         {renderDetailModal()}

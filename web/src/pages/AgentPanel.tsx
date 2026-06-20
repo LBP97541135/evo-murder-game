@@ -34,7 +34,7 @@ import {
   IconUserStar,
 } from "@tabler/icons-react";
 
-import { listPersonas, type AgentPersona } from "../api/invoke";
+import { listAgents, listPersonas, type AgentInfo, type AgentPersona } from "../api/invoke";
 import { StudioShell } from "./StudioShell";
 
 // ============================
@@ -72,6 +72,11 @@ type CompanionAgent = {
   oneliner: string;
   roleMatch: string;
   reason: string;
+  recentTags?: string[];
+  historyCount?: number;
+  registered?: boolean;
+  model?: string;
+  personaKey?: string;
   isFavorited: boolean;
 };
 
@@ -90,6 +95,11 @@ type DMAgent = {
   playTime: string;
   highlight: string;
   oneliner: string;
+  recentTags?: string[];
+  historyCount?: number;
+  registered?: boolean;
+  model?: string;
+  personaKey?: string;
   isFavorited: boolean;
 };
 
@@ -599,7 +609,10 @@ function AgentPanel() {
   );
 
   React.useEffect(() => {
-    const toCompanion = (persona: AgentPersona): CompanionAgent => ({
+    const matchAgent = (persona: AgentPersona, agents: AgentInfo[]) =>
+      agents.find((item) => item.persona_key === persona.key || item.key === persona.key);
+
+    const toCompanion = (persona: AgentPersona, agent?: AgentInfo): CompanionAgent => ({
       key: persona.key,
       name: persona.name,
       avatar: agentPortraits[persona.key] || "",
@@ -616,9 +629,14 @@ function AgentPanel() {
       oneliner: persona.style || persona.vibe,
       roleMatch: persona.roleMatch,
       reason: persona.reason,
+      recentTags: persona.recentTags || [],
+      historyCount: persona.historyCount || 0,
+      registered: agent?.registered || false,
+      model: agent?.model || "",
+      personaKey: agent?.persona_key || persona.key,
       isFavorited: false,
     });
-    const toDm = (persona: AgentPersona): DMAgent => ({
+    const toDm = (persona: AgentPersona, agent?: AgentInfo): DMAgent => ({
       key: persona.key,
       name: persona.name,
       avatar: agentPortraits[persona.key] || "",
@@ -633,13 +651,22 @@ function AgentPanel() {
       playTime: "全天",
       highlight: persona.strengths?.[0] || "DM Agent",
       oneliner: persona.style || persona.vibe,
+      recentTags: persona.recentTags || [],
+      historyCount: persona.historyCount || 0,
+      registered: agent?.registered || false,
+      model: agent?.model || "",
+      personaKey: agent?.persona_key || persona.key,
       isFavorited: false,
     });
 
-    listPersonas()
-      .then((personas) => {
-        const companions = personas.filter((item) => item.role === "companion").map(toCompanion);
-        const dms = personas.filter((item) => item.role === "dm").map(toDm);
+    Promise.all([listPersonas(), listAgents()])
+      .then(([personas, agentResult]) => {
+        const companions = personas
+          .filter((item) => item.role === "companion")
+          .map((item) => toCompanion(item, matchAgent(item, agentResult.agents)));
+        const dms = personas
+          .filter((item) => item.role === "dm")
+          .map((item) => toDm(item, matchAgent(item, agentResult.agents)));
         if (companions.length) setCompanionAgents(companions);
         if (dms.length) setDmAgents(dms);
         setBackendError(false);
@@ -1388,6 +1415,21 @@ function AgentPanel() {
                 </Text>
                 <Title order={2}>{detailAgent.name}</Title>
                 <Text c="dimmed">{detailAgent.vibe}</Text>
+                <Group gap="xs">
+                  <Badge variant={detailAgent.registered ? "filled" : "light"} color={detailAgent.registered ? "teal" : "gray"}>
+                    {detailAgent.registered ? "已注册后端节点" : "未注册后端节点"}
+                  </Badge>
+                  {detailAgent.personaKey ? (
+                    <Badge variant="light" color="orange">
+                      Persona: {detailAgent.personaKey}
+                    </Badge>
+                  ) : null}
+                  {detailAgent.model ? (
+                    <Badge variant="light" color="blue">
+                      {detailAgent.model}
+                    </Badge>
+                  ) : null}
+                </Group>
               </Stack>
               <Badge variant="light" color="red">
                 {detailAgent.highlight}
@@ -1435,6 +1477,19 @@ function AgentPanel() {
                       ))}
                     </Group>
                   </Card>
+                  <Card radius="lg" className="ambient-grid" p="md">
+                    <Text fw={700}>recentTags</Text>
+                    <Group gap="xs" mt="sm">
+                      {((detailAgent as CompanionAgent).recentTags || []).map((tag) => (
+                        <Badge key={tag} variant="light" color="blue">
+                          {tag}
+                        </Badge>
+                      ))}
+                      {((detailAgent as CompanionAgent).recentTags || []).length === 0 ? (
+                        <Text size="sm" c="dimmed">暂无</Text>
+                      ) : null}
+                    </Group>
+                  </Card>
                 </>
               ) : (
                 <>
@@ -1466,6 +1521,19 @@ function AgentPanel() {
                     <Text size="sm" c="dimmed" mt="sm" lh={1.65}>
                       {(detailAgent as DMAgent).fairness}
                     </Text>
+                  </Card>
+                  <Card radius="lg" className="ambient-grid" p="md">
+                    <Text fw={700}>recentTags</Text>
+                    <Group gap="xs" mt="sm">
+                      {((detailAgent as DMAgent).recentTags || []).map((tag) => (
+                        <Badge key={tag} variant="light" color="blue">
+                          {tag}
+                        </Badge>
+                      ))}
+                      {((detailAgent as DMAgent).recentTags || []).length === 0 ? (
+                        <Text size="sm" c="dimmed">暂无</Text>
+                      ) : null}
+                    </Group>
                   </Card>
                 </>
               )}

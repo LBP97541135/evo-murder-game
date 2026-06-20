@@ -1,4 +1,4 @@
-import React from "react";
+﻿import React from "react";
 import {
   ActionIcon,
   Avatar,
@@ -42,29 +42,31 @@ import {
   GAME_PHASES,
   GAME_PLAYERS,
   INITIAL_EVIDENCE,
-  INTRO_LINES,
   PRIVATE_THREADS,
   ROLE_OPTIONS,
-  SCRIPT_CHAPTERS,
   SEARCH_EVIDENCE,
 } from "./gameMockData";
 import { backendEvidenceToGameEvidence } from "../api/adapters";
 import {
+  getScript,
   createEvidence,
   createGameSession,
   forceGamePhase,
   getGamePhase,
   getEvidences,
+  listPersonas,
   presentEvidence,
   saveConversation,
   submitGameVote,
+  type AgentPersona,
+  type BackendScript,
 } from "../api/invoke";
 import { AgentCastingPanel } from "../components/AgentCastingPanel";
 import { StudioShell } from "./StudioShell";
 
 const scriptMap: Record<string, string> = {
   "iron-avenue": "锈铁大道",
-  "black-archive": "黑箱档案馆",
+  "black-archive": "黑匣档案馆",
   "mirror-parade": "镜面游行",
   "salt-ward": "盐雾病房",
   "wolf-assembly": "狼群集会",
@@ -104,7 +106,7 @@ type DialogType =
 type InquiryRecord = {
   id: number;
   sourceEventId: number;
-  sourceType: "证据" | "关键发言";
+  sourceType: "璇佹嵁" | "鍏抽敭鍙戣█";
   sourceTitle: string;
   evidence?: Evidence;
   targetId: string;
@@ -119,47 +121,56 @@ type ScriptHighlight = {
   text: string;
 };
 
-const initialEvents: PublicEvent[] = [
-  { id: 1, type: "system", title: "阶段开始", text: "公共讨论已开启，所有发言按照队列顺序进行。" },
-  {
-    id: 2,
-    type: "speech",
-    speaker: "陈墨",
-    text: "我保管的事故档案里，值班表在十二年前归档时就已经缺失了一页。最近出现的这张表不是原件，我想先确认它究竟是什么时候被替换的，以及谁有机会接触旧档案室。",
-    tone: "teal",
-    suspectId: "echo",
-  },
-  {
-    id: 3,
-    type: "speech",
-    speaker: "白鸦 Agent",
-    text: "访客卡背面的锈迹呈现规则的长方形边框，更像地下储物柜的编号牌，而不是宿舍门牌。卡片断口还有新鲜摩擦痕迹，说明它最近曾被人从狭窄金属缝隙中取出。",
-    tone: "blue",
-    suspectId: "echo",
-    evidenceId: "visitor-card",
-  },
-  { id: 4, type: "evidence", speaker: "白鸦 Agent", evidence: INITIAL_EVIDENCE[0], reason: "访客卡背面的锈迹可能对应地下储物柜。" },
-];
+const initialEvents: PublicEvent[] = [];
 
 function formatTime(totalSeconds: number) {
   return `${String(Math.floor(totalSeconds / 60)).padStart(2, "0")}:${String(totalSeconds % 60).padStart(2, "0")}`;
 }
 
+function summarizeText(text: string, maxLength = 120) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength).trim()}...` : normalized;
+}
+
+function buildScriptReadingContent(script: BackendScript | null) {
+  if (!script) return "";
+
+  const sections = [
+    script.description,
+    script.globalStory,
+    script.characters?.length
+      ? `角色信息：${script.characters
+          .map((character) => `${character.name}：${character.bio || character.context || character.personality || "暂无描述"}`)
+          .join("\n")}`
+      : "",
+    script.evidences?.length
+      ? `关键证据：${script.evidences
+          .map((item) => `${item.name}：${item.description || "暂无描述"}`)
+          .join("\n")}`
+      : "",
+  ].filter(Boolean);
+
+  return sections.join("\n\n");
+}
+
 function GamePage() {
   const navigate = useNavigate();
   const { id = "iron-avenue" } = useParams();
-  const scriptTitle = scriptMap[id] || "未知剧本";
-  const gameMode = id === "black-archive" ? "单人游戏" : "真人组队";
+  const fallbackScriptTitle = scriptMap[id] || "鏈煡鍓ф湰";
+  const gameMode = id === "black-archive" ? "鍗曚汉娓告垙" : "鐪熶汉缁勯槦";
   const { ref: fullscreenRef, toggle: toggleFullscreen, fullscreen } = useFullscreen();
 
   const [phaseIndex, setPhaseIndex] = React.useState(0);
+  const [scriptData, setScriptData] = React.useState<BackendScript | null>(null);
+  const [personas, setPersonas] = React.useState<AgentPersona[]>([]);
   const [sessionId, setSessionId] = React.useState(
     () => window.localStorage.getItem(`game-session:${id}`) || "",
   );
+  const scriptTitle = scriptData?.title || fallbackScriptTitle;
   const phase = GAME_PHASES[phaseIndex];
   const [selectedRole, setSelectedRole] = React.useState("");
   const [roleConfirmed, setRoleConfirmed] = React.useState(false);
-  const [chapter, setChapter] = React.useState(0);
   const [readingDone, setReadingDone] = React.useState(false);
   const highlightStorageKey = `game-script-highlights:${id}`;
   const [scriptHighlights, setScriptHighlights] = React.useState<ScriptHighlight[]>(() => {
@@ -171,7 +182,6 @@ function GamePage() {
     }
   });
   const [selectedScriptText, setSelectedScriptText] = React.useState("");
-  const [selectedScriptChapter, setSelectedScriptChapter] = React.useState(0);
   const [introduced, setIntroduced] = React.useState<string[]>([]);
   const [searchesLeft, setSearchesLeft] = React.useState(2);
   const [evidence, setEvidence] = React.useState<Evidence[]>([]);
@@ -179,20 +189,20 @@ function GamePage() {
   const [queue, setQueue] = React.useState<string[]>(["chen", "crow"]);
   const [currentSpeaker, setCurrentSpeaker] = React.useState<string | null>("chen");
   const [forcedAnswer, setForcedAnswer] = React.useState<{ asker: string; agentId: string; question: string } | null>(null);
-  const [events, setEvents] = React.useState<PublicEvent[]>(initialEvents);
+  const [events, setEvents] = React.useState<PublicEvent[]>([]);
   const [rightTab, setRightTab] = React.useState<string | null>("script");
   const [dialog, setDialog] = React.useState<DialogType>(null);
   const [selectedPlayerId, setSelectedPlayerId] = React.useState<string | null>(null);
   const [targetId, setTargetId] = React.useState("crow");
   const [question, setQuestion] = React.useState("");
   const [selectedEvidenceId, setSelectedEvidenceId] = React.useState("");
-  const [evidenceVisibility, setEvidenceVisibility] = React.useState("所有人");
+  const [evidenceVisibility, setEvidenceVisibility] = React.useState("鎵€鏈変汉");
   const [evidenceReason, setEvidenceReason] = React.useState("");
   const [privateThreads, setPrivateThreads] = React.useState(PRIVATE_THREADS);
   const [activeThreadId, setActiveThreadId] = React.useState(PRIVATE_THREADS[0].id);
   const [privateMessage, setPrivateMessage] = React.useState("");
   const [publicMessage, setPublicMessage] = React.useState("");
-  const [feedback, setFeedback] = React.useState("欢迎进入游戏，请点击圆桌席位选择你喜欢的角色");
+  const [feedback, setFeedback] = React.useState("娆㈣繋杩涘叆娓告垙锛岃鐐瑰嚮鍦嗘甯綅閫夋嫨浣犲枩娆㈢殑瑙掕壊");
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [speakerSeconds, setSpeakerSeconds] = React.useState(90);
   const [voteSuspect, setVoteSuspect] = React.useState("");
@@ -207,7 +217,7 @@ function GamePage() {
   const [inquiryTargetId, setInquiryTargetId] = React.useState("crow");
   const [inquiryQuestion, setInquiryQuestion] = React.useState("");
   const [inquiryRecords, setInquiryRecords] = React.useState<InquiryRecord[]>([]);
-  const [privateInviteStatus, setPrivateInviteStatus] = React.useState<"未处理" | "稍后处理" | "已接受" | "已拒绝">("未处理");
+  const [privateInviteStatus, setPrivateInviteStatus] = React.useState<string>("未处理");
   const [chatHistoryOpen, setChatHistoryOpen] = React.useState(false);
 
   React.useEffect(() => {
@@ -226,9 +236,20 @@ function GamePage() {
         setSelectedEvidenceId((current) => current || records[0]?.id || "");
       })
       .catch((error) => {
+        showFeedback(`鍚庣璇佺墿鍔犺浇澶辫触锛?{error instanceof Error ? error.message : String(error)}`);
         showFeedback(`后端证物加载失败：${error instanceof Error ? error.message : String(error)}`);
-      });
   }, [id, sessionId]);
+
+  React.useEffect(() => {
+    Promise.all([getScript(id), listPersonas()])
+      .then(([script, personaList]) => {
+        setScriptData(script);
+        setPersonas(personaList);
+      })
+      .catch((error) => {
+        showFeedback(`鍚庣鍓ф湰鎴?Agent 浜鸿鍔犺浇澶辫触锛?{error instanceof Error ? error.message : String(error)}`);
+        showFeedback(`后端剧本或 Agent 人设加载失败：${error instanceof Error ? error.message : String(error)}`);
+  }, [id]);
 
   const playerById = (playerId: string | null) => GAME_PLAYERS.find((item) => item.id === playerId);
   const current = playerById(currentSpeaker);
@@ -239,14 +260,103 @@ function GamePage() {
   const activeThread = privateThreads.find((item) => item.id === activeThreadId);
   const agents = GAME_PLAYERS.filter((player) => player.agent && player.id !== "dm");
   const dm = playerById("dm");
+  const scriptReadingContent = React.useMemo(() => buildScriptReadingContent(scriptData), [scriptData]);
+  const scriptEvidenceSeed = React.useMemo(
+    () => (scriptData?.evidences || []).map((item) => ({
+      id: String(item.id || `script-evidence-${item.name}`),
+      name: String(item.name || "未命名证据"),
+      description: String(item.description || "鏆傛棤鎻忚堪"),
+      location: String(item.category || "鍓ф湰璧勬枡"),
+      time: String(item.initialState || "鍓ф湰棰勭疆"),
+      source: String(item.importance || "鍚庣鍓ф湰"),
+      visibility: "仅自己" as Evidence["visibility"],
+      icon: String(item.category || "file"),
+    })),
+    [scriptData],
+  );
+  const introLines = React.useMemo(() => {
+    const personaByKey = new Map(personas.map((item) => [item.key, item]));
+    const characterQueue = scriptData?.characters || [];
+    return {
+      user: summarizeText(
+        `${characterQueue[0]?.name || "玩家"}：${characterQueue[0]?.bio || characterQueue[0]?.context || scriptData?.description || ""}`,
+        140,
+      ),
+      chen: summarizeText(
+        `${characterQueue[1]?.name || "角色二"}：${characterQueue[1]?.bio || characterQueue[1]?.context || scriptData?.globalStory || ""}`,
+        140,
+      ),
+      crow: summarizeText(
+        `${personaByKey.get("white-crow")?.name || "白鸦"}：${personaByKey.get("white-crow")?.style || personaByKey.get("white-crow")?.vibe || ""}`,
+        140,
+      ),
+      su: summarizeText(
+        `${characterQueue[2]?.name || "角色三"}：${characterQueue[2]?.bio || characterQueue[2]?.context || scriptData?.description || ""}`,
+        140,
+      ),
+      echo: summarizeText(
+        `${personaByKey.get("echo")?.name || "回声"}：${personaByKey.get("echo")?.style || personaByKey.get("echo")?.vibe || ""}`,
+        140,
+      ),
+    } as Record<string, string>;
+  }, [personas, scriptData]);
+  const sceneCard = React.useMemo(
+    () => ({
+      badge: "DM 鍦烘櫙",
+      title: scriptData?.title || fallbackScriptTitle,
+      description: summarizeText(scriptData?.globalStory || scriptData?.description || "", 160),
+    }),
+    [fallbackScriptTitle, scriptData],
+  );
 
   React.useEffect(() => {
     try {
       window.localStorage.setItem(highlightStorageKey, JSON.stringify(scriptHighlights));
     } catch {
-      // 浏览器禁用本地存储时仍允许继续游戏，只是不跨刷新保存。
+      // 娴忚鍣ㄧ鐢ㄦ湰鍦板瓨鍌ㄦ椂浠嶅厑璁哥户缁父鎴忥紝鍙槸涓嶈法鍒锋柊淇濆瓨銆?    }
     }
   }, [highlightStorageKey, scriptHighlights]);
+
+  React.useEffect(() => {
+    if (!scriptData || events.length > 0) return;
+
+    const seededEvidence = scriptEvidenceSeed[0] || INITIAL_EVIDENCE[0];
+    const nextEvents: PublicEvent[] = [
+      {
+        id: 1,
+        type: "system",
+        title: "阶段开始",
+        text: summarizeText(scriptData.description || scriptData.globalStory || "后端剧本已加载，公共讨论已开启。", 140),
+      },
+      {
+        id: 2,
+        type: "speech",
+        speaker: GAME_PLAYERS.find((item) => item.id === "chen")?.name || "闄堝ⅷ",
+        text: introLines.chen || "后端未提供开场介绍。",
+        tone: "teal",
+        suspectId: "echo",
+      },
+      {
+        id: 3,
+        type: "speech",
+        speaker: `${personas.find((item) => item.key === "white-crow")?.name || "鐧介甫"} Agent`,
+        text: introLines.crow || "后端未提供 Agent 开场介绍。",
+        tone: "blue",
+        suspectId: "echo",
+        evidenceId: seededEvidence?.id,
+      },
+    ];
+    if (seededEvidence) {
+      nextEvents.push({
+        id: 4,
+        type: "evidence",
+        speaker: `${personas.find((item) => item.key === "white-crow")?.name || "鐧介甫"} Agent`,
+        evidence: seededEvidence,
+        reason: summarizeText(seededEvidence.description, 72),
+      });
+    }
+    setEvents(nextEvents);
+  }, [events.length, introLines, personas, scriptData, scriptEvidenceSeed]);
 
   const addEvent = (event: PublicEventInput) => {
     setEvents((items) => [...items, { ...event, id: Date.now() } as PublicEvent]);
@@ -261,7 +371,7 @@ function GamePage() {
       if (activeSessionId) {
         await getGamePhase(activeSessionId);
       } else {
-        const session = await createGameSession(id, `剧本游戏：${scriptTitle}`);
+        const session = await createGameSession(id, `鍓ф湰娓告垙锛?{scriptTitle}`);
         activeSessionId = session.sessionId;
         setSessionId(activeSessionId);
         window.localStorage.setItem(`game-session:${id}`, activeSessionId);
@@ -270,8 +380,8 @@ function GamePage() {
       setPhaseIndex(1);
       showFeedback(`角色已确认，后端游戏会话 ${activeSessionId} 可用。`);
     } catch (error) {
-      showFeedback(`无法确认角色：后端游戏会话创建或恢复失败：${error instanceof Error ? error.message : String(error)}`);
-    }
+      showFeedback(`鏃犳硶纭瑙掕壊锛氬悗绔父鎴忎細璇濆垱寤烘垨鎭㈠澶辫触锛?{error instanceof Error ? error.message : String(error)}`);
+      showFeedback(`无法确认角色：${error instanceof Error ? error.message : String(error)}`);
   };
 
   const backendPhaseForIndex = (index: number) => {
@@ -282,15 +392,15 @@ function GamePage() {
 
   const goToPhase = async (index: number) => {
     if (phase.id === "role-selection" && index > 0 && !roleConfirmed) {
-      showFeedback("请先确认角色，选角完成后才能进入后续阶段。");
+      showFeedback("请先确认角色后再进入后续阶段。");
       return;
     }
     if (index === 0 && roleConfirmed) {
-      showFeedback("角色已确认，选角阶段不可再次进入。");
+      showFeedback("角色已确认，不能再次进入选角阶段。");
       return;
     }
     if (index > phaseIndex + 1) {
-      showFeedback("请先完成当前阶段，不能跳过尚未完成的流程。");
+      showFeedback("请先完成当前阶段，不能跳过流程。");
       return;
     }
     if (!sessionId) {
@@ -300,8 +410,8 @@ function GamePage() {
     try {
       await forceGamePhase(sessionId, backendPhaseForIndex(index));
     } catch (error) {
+      showFeedback(`鍚庣闃舵鍒囨崲澶辫触锛?{error instanceof Error ? error.message : String(error)}`);
       showFeedback(`后端阶段切换失败：${error instanceof Error ? error.message : String(error)}`);
-      return;
     }
     setPhaseIndex(index);
     setSpeakerSeconds(90);
@@ -313,15 +423,15 @@ function GamePage() {
 
   const advancePhase = () => {
     if (phase.id === "role-selection" && !roleConfirmed) return showFeedback("请先确认角色。");
-    if (phase.id === "script-reading" && !readingDone) return showFeedback("请阅读全部章节并确认完成。");
+    if (phase.id === "script-reading" && !readingDone) return showFeedback("请先阅读后端剧本内容并确认完成。");
     if (phase.id === "intro" && introduced.length < 5) return showFeedback("仍有角色尚未完成自我介绍。");
-    if (phase.id === "search" && searchesLeft > 0) return showFeedback("请使用完本阶段的搜证次数。");
+    if (phase.id === "search" && searchesLeft > 0) return showFeedback("请先用完本阶段的搜证次数。");
     if (phaseIndex < GAME_PHASES.length - 1) goToPhase(phaseIndex + 1);
   };
 
   const joinQueue = () => {
-    if (phase.id === "vote") return showFeedback("投票阶段已经停止新的发言申请。");
-    if (forcedAnswer) return showFeedback("当前为强制回答，其他角色暂时不可插队。");
+    if (phase.id === "vote") return showFeedback("投票阶段已停止新的发言申请。");
+    if (forcedAnswer) return showFeedback("当前为强制回答状态，其他角色暂时不可插队。");
     if (userQueued || isUserSpeaking) return;
     setQueue((items) => [...items, "user"]);
     showFeedback(`已进入发言队列，当前排位 ${queue.length + 1}。`);
@@ -337,7 +447,7 @@ function GamePage() {
       addEvent({
         type: "speech",
         speaker: `${playerById(forcedAnswer.agentId)?.name} Agent`,
-        text: `关于“${forcedAnswer.question}”，我认为值班表压痕说明修改发生在旧终端，而钥匙的持有者需要重点排查。`,
+        text: `关于“${forcedAnswer.question}”，我认为值班表压痕说明修改发生在旧终端，而钥匙持有者需要重点排查。`,
         tone: "blue",
       });
       setForcedAnswer(null);
@@ -356,7 +466,7 @@ function GamePage() {
     const introPlayer = playerById(currentIntroId);
     if (!introPlayer) return;
     setIntroduced((items) => [...items, currentIntroId]);
-    addEvent({ type: "speech", speaker: introPlayer.name, text: INTRO_LINES[currentIntroId], tone: introPlayer.color || "gray" });
+    addEvent({ type: "speech", speaker: introPlayer.name, text: introLines[currentIntroId], tone: introPlayer.color || "gray" });
     setIntroSpotlight(introPlayer);
     showFeedback(`${introPlayer.name} 已完成自我介绍。`);
   };
@@ -387,18 +497,19 @@ function GamePage() {
       showFeedback(`后端搜证失败：${error instanceof Error ? error.message : String(error)}`);
     }
   };
+  };
 
   const confirmForcedAnswer = () => {
     if (!isUserSpeaking) return showFeedback("只有在自己发言时才能指定 Agent 回答。");
     const agent = playerById(targetId);
     if (!question.trim() || !agent) return showFeedback("请选择 Agent 并填写问题。");
-    setForcedAnswer({ asker: "林晓青", agentId: targetId, question });
+    setForcedAnswer({ asker: "鏋楁檽闈?, agentId: targetId, question });
     setQueue((items) => [targetId, ...items.filter((item) => item !== targetId && item !== currentSpeaker)]);
-    addEvent({ type: "forced", asker: "林晓青", agent: agent.name, question });
+    addEvent({ type: "forced", asker: "鏋楁檽闈?, agent: agent.name, question });
     setDialog(null);
     setQuestion("");
+    showFeedback(`${agent.name} 宸茶鎸囧畾涓轰笅涓€浣嶅彂瑷€鑰咃紝鍏朵粬瑙掕壊涓嶅彲鎻掗槦銆俙);
     showFeedback(`${agent.name} 已被指定为下一位发言者，其他角色不可插队。`);
-  };
 
   const showEvidence = async () => {
     if (!isUserSpeaking) return showFeedback("只有在自己发言时才能出示证物。");
@@ -409,26 +520,26 @@ function GamePage() {
     try {
       await presentEvidence(
         item.id,
-        evidenceVisibility === "指定角色" ? targetId : "all",
+        evidenceVisibility === "鎸囧畾瑙掕壊" ? targetId : "all",
         "player",
         reason,
         evidenceVisibility,
       );
     } catch (error) {
+      showFeedback(`鍚庣鍑虹ず璇佺墿澶辫触锛?{error instanceof Error ? error.message : String(error)}`);
       showFeedback(`后端出示证物失败：${error instanceof Error ? error.message : String(error)}`);
-      return;
     }
     setEvidence((items) => items.map((entry) => entry.id === item.id ? { ...entry, visibility: evidenceVisibility as Evidence["visibility"] } : entry));
     addEvent({
       type: "evidence",
-      speaker: "林晓青",
+      speaker: "鏋楁檽闈?,
       evidence: { ...item, visibility: evidenceVisibility as Evidence["visibility"] },
       reason: evidenceReason.trim() || undefined,
     });
     setDialog(null);
     setEvidenceReason("");
+    showFeedback(`鍚庣宸茶褰曞嚭绀衡€?{item.name}鈥濓紝鍏紑鑼冨洿锛?{evidenceVisibility}銆俙);
     showFeedback(`后端已记录出示“${item.name}”，公开范围：${evidenceVisibility}。`);
-  };
 
   const acceptPrivateInvite = (playerId = targetId) => {
     const player = playerById(playerId);
@@ -440,9 +551,9 @@ function GamePage() {
         playerId,
         name: player.name,
         unread: 0,
-        permission: "主动发言" as const,
+        permission: "涓诲姩鍙戣█" as const,
+        messages: ["绉佽亰宸插缓绔嬨€傚叕鍏辫璁轰粛鍦ㄧ户缁紝鏈細璇濆唴瀹逛粎鍙屾柟鍙銆?],
         messages: ["私聊已建立。公共讨论仍在继续，本会话内容仅双方可见。"],
-      };
       setPrivateThreads((items) => [...items, thread]);
       setActiveThreadId(thread.id);
     } else {
@@ -450,8 +561,8 @@ function GamePage() {
     }
     setRightTab("chat");
     setDialog(null);
+    showFeedback(`宸蹭笌 ${player.name} 寤虹珛绉佽亰锛屽叕鍏卞彂瑷€闃熷垪鏈彈褰卞搷銆俙);
     showFeedback(`已与 ${player.name} 建立私聊，公共发言队列未受影响。`);
-  };
 
   const sendPublicMessage = async () => {
     if (!publicMessage.trim()) return;
@@ -465,11 +576,11 @@ function GamePage() {
         chatMessages: [{ role: "user", content }],
         finalResponse: content,
       });
-      addEvent({ type: "speech", speaker: "林晓青", text: content, tone: "orange" });
+      addEvent({ type: "speech", speaker: "鏋楁檽闈?, text: content, tone: "orange" });
       setPublicMessage("");
     } catch (error) {
+      showFeedback(`鍚庣淇濆瓨鍏紑鍙戣█澶辫触锛?{error instanceof Error ? error.message : String(error)}`);
       showFeedback(`后端保存公开发言失败：${error instanceof Error ? error.message : String(error)}`);
-    }
   };
 
   const sendPrivateMessage = async () => {
@@ -483,12 +594,12 @@ function GamePage() {
         chatMessages: [{ role: "user", content }],
       });
       setPrivateThreads((threads) => threads.map((thread) =>
-        thread.id === activeThread.id ? { ...thread, messages: [...thread.messages, `我：${content}`] } : thread,
+        thread.id === activeThread.id ? { ...thread, messages: [...thread.messages, `鎴戯細${content}`] } : thread,
       ));
       setPrivateMessage("");
     } catch (error) {
+      showFeedback(`鍚庣淇濆瓨绉佽亰澶辫触锛?{error instanceof Error ? error.message : String(error)}`);
       showFeedback(`后端保存私聊失败：${error instanceof Error ? error.message : String(error)}`);
-    }
   };
 
   const submitVote = async () => {
@@ -500,22 +611,21 @@ function GamePage() {
       await forceGamePhase(sessionId, "voting");
       const result = await submitGameVote(sessionId, voteSuspect, voteReason);
       setVoteSubmitted(true);
+      showFeedback(result.message || "鎺ㄧ悊鎶曠エ宸插啓鍏ュ悗绔€?);
       showFeedback(result.message || "推理投票已写入后端。");
-    } catch (error) {
+      showFeedback(`鍚庣鎶曠エ澶辫触锛?{error instanceof Error ? error.message : String(error)}`);
       showFeedback(`后端投票失败：${error instanceof Error ? error.message : String(error)}`);
-    }
   };
 
   const playerStatus = (playerId: string) => {
-    if (currentSpeaker === playerId) return "正在发言";
-    if (queue.includes(playerId)) return "等待发言";
-    return "思考中";
+    if (currentSpeaker === playerId) return "姝ｅ湪鍙戣█";
+    if (queue.includes(playerId)) return "绛夊緟鍙戣█";
+    return "鎬濊€冧腑";
   };
 
-  const captureScriptSelection = (chapterIndex: number) => {
+  const captureScriptSelection = (_chapterIndex: number) => {
     const selected = window.getSelection()?.toString().trim() || "";
     setSelectedScriptText(selected);
-    setSelectedScriptChapter(chapterIndex);
   };
 
   const addScriptHighlight = () => {
@@ -524,26 +634,26 @@ function GamePage() {
       return;
     }
     const duplicate = scriptHighlights.some(
-      (item) => item.chapter === selectedScriptChapter && item.text === selectedScriptText,
+      (item) => item.chapter === 0 && item.text === selectedScriptText,
     );
     if (!duplicate) {
       setScriptHighlights((items) => [
         ...items,
         {
-          id: `${selectedScriptChapter}-${Date.now()}`,
-          chapter: selectedScriptChapter,
+          id: `0-${Date.now()}`,
+          chapter: 0,
           text: selectedScriptText,
         },
       ]);
     }
     setSelectedScriptText("");
     window.getSelection()?.removeAllRanges();
-    showFeedback("高亮文段已保存。");
+    showFeedback("高亮片段已保存。");
   };
 
   const removeScriptHighlight = (highlightId: string) => {
     setScriptHighlights((items) => items.filter((item) => item.id !== highlightId));
-    showFeedback("高亮文段已删除。");
+    showFeedback("高亮片段已删除。");
   };
 
   const discussionSource = (eventId: number | null) => {
@@ -553,7 +663,7 @@ function GamePage() {
   };
 
   const discussionSourceTitle = (event: Extract<PublicEvent, { type: "speech" | "evidence" }>) =>
-    event.type === "evidence" ? event.evidence.name : `${event.speaker} 的发言`;
+    event.type === "evidence" ? event.evidence.name : `${event.speaker} 鐨勫彂瑷€`;
 
   const openEvidenceDetail = (item: Evidence) => {
     setSelectedDetailEvidence(item);
@@ -583,14 +693,14 @@ function GamePage() {
     ));
     addEvent({
       type: "accusation",
-      actor: "林晓青",
-      target: `${target.role} · ${target.name}`,
+      actor: "鏋楁檽闈?,
+      target: `${target.role} 路 ${target.name}`,
       sourceTitle: discussionSourceTitle(source),
       reason: pointReason.trim() || undefined,
     });
     setDialog(null);
+    showFeedback(`宸插皢鈥?{discussionSourceTitle(source)}鈥濇寚鍚?${target.role}銆俙);
     showFeedback(`已将“${discussionSourceTitle(source)}”指向 ${target.role}。`);
-  };
 
   const openInquiryDialog = (eventId: number) => {
     setSelectedDiscussionEventId(eventId);
@@ -608,23 +718,23 @@ function GamePage() {
     }
     const sourceTitle = discussionSourceTitle(source);
     const answer = source.type === "evidence"
-      ? `我检查过“${source.evidence.name}”的来源。它能证明时间和地点存在关联，但还不能单独证明持有人身份。`
-      : `关于这段发言，我的判断是其中有一处时间顺序需要复核。我愿意把相关行动记录公开出来接受比对。`;
+      ? `鎴戞鏌ヨ繃鈥?{source.evidence.name}鈥濈殑鏉ユ簮銆傚畠鑳借瘉鏄庢椂闂村拰鍦扮偣瀛樺湪鍏宠仈锛屼絾杩樹笉鑳藉崟鐙瘉鏄庢寔鏈変汉韬唤銆俙
+      : `鍏充簬杩欐鍙戣█锛屾垜鐨勫垽鏂槸鍏朵腑鏈変竴澶勬椂闂撮『搴忛渶瑕佸鏍搞€傛垜鎰挎剰鎶婄浉鍏宠鍔ㄨ褰曞叕寮€鍑烘潵鎺ュ彈姣斿銆俙;
     const record: InquiryRecord = {
       id: Date.now(),
       sourceEventId: source.id,
-      sourceType: source.type === "evidence" ? "证据" : "关键发言",
+      sourceType: source.type === "evidence" ? "璇佹嵁" : "鍏抽敭鍙戣█",
       sourceTitle,
       evidence: source.type === "evidence" ? source.evidence : undefined,
       targetId: target.id,
-      targetName: `${target.role} · ${target.name}`,
+      targetName: `${target.role} 路 ${target.name}`,
       question: inquiryQuestion.trim(),
       answer,
     };
     setInquiryRecords((items) => [...items, record]);
     addEvent({
       type: "inquiry",
-      asker: "林晓青",
+      asker: "鏋楁檽闈?,
       target: record.targetName,
       sourceTitle,
       question: record.question,
@@ -633,8 +743,8 @@ function GamePage() {
     setRightTab("chat");
     setDialog(null);
     setInquiryQuestion("");
+    showFeedback(`宸插畬鎴愬 ${target.role} 鐨勮川璇紝璁板綍宸蹭繚瀛樺埌璇佺墿鏍忋€俙);
     showFeedback(`已完成对 ${target.role} 的质询，记录已保存到证物栏。`);
-  };
 
   const selectedDiscussionSource = discussionSource(selectedDiscussionEventId);
   const selectedDiscussionSpeaker = selectedDiscussionSource
@@ -691,7 +801,7 @@ function GamePage() {
             <Box style={{ flex: 1 }}>
               <Text size="sm" fw={800} c={`${event.tone}.3`}>{event.speaker}</Text>
               <Text size="sm" c="gray.3" lh={1.65}>{event.text}</Text>
-              {phase.id === "discussion" && <Text size="xs" c="dimmed" mt={6}>点击查看发言详情</Text>}
+              {phase.id === "discussion" && <Text size="xs" c="dimmed" mt={6}>鐐瑰嚮鏌ョ湅鍙戣█璇︽儏</Text>}
             </Box>
           </Group>
         </Paper>
@@ -723,26 +833,26 @@ function GamePage() {
             <Badge>{event.evidence.visibility}</Badge>
           </Group>
           <Text size="sm" c="dimmed" mt={6}>{event.evidence.description}</Text>
-          {event.reason && <Text size="sm" mt={6}>出示理由：{event.reason}</Text>}
-          <Group gap="lg" mt="sm"><Text size="xs">出示者：{event.speaker}</Text><Text size="xs">地点：{event.evidence.location}</Text><Text size="xs">时间：{event.evidence.time}</Text></Group>
-          {phase.id === "discussion" && <Text size="xs" c="dimmed" mt="sm">点击查看证据与发言详情</Text>}
+          {event.reason && <Text size="sm" mt={6}>鍑虹ず鐞嗙敱锛歿event.reason}</Text>}
+          <Group gap="lg" mt="sm"><Text size="xs">鍑虹ず鑰咃細{event.speaker}</Text><Text size="xs">鍦扮偣锛歿event.evidence.location}</Text><Text size="xs">鏃堕棿锛歿event.evidence.time}</Text></Group>
+          {phase.id === "discussion" && <Text size="xs" c="dimmed" mt="sm">鐐瑰嚮鏌ョ湅璇佹嵁涓庡彂瑷€璇︽儏</Text>}
         </Paper>
       );
     }
     if (event.type === "forced") {
       return (
         <Paper key={event.id} radius="xl" p="md" className="game-forced-event">
-          <Text fw={900}>指定回答：{event.asker} → {event.agent}</Text>
-          <Text size="sm" mt={5}>“{event.question}”</Text>
-          <Text size="xs" c="red.3" mt={6}>被指定 Agent 必须成为下一位发言者，其他角色不可插队。</Text>
+          <Text fw={900}>鎸囧畾鍥炵瓟锛歿event.asker} 鈫?{event.agent}</Text>
+          <Text size="sm" mt={5}>鈥渰event.question}鈥?/Text>
+          <Text size="xs" c="red.3" mt={6}>琚寚瀹?Agent 蹇呴』鎴愪负涓嬩竴浣嶅彂瑷€鑰咃紝鍏朵粬瑙掕壊涓嶅彲鎻掗槦銆?/Text>
         </Paper>
       );
     }
     if (event.type === "accusation") {
       return (
         <Paper key={event.id} radius="lg" p="sm" className="game-accusation-event">
-          <Text fw={900}>{event.actor} 将“{event.sourceTitle}”指向 {event.target}</Text>
-          {event.reason && <Text size="sm" c="dimmed" mt={5}>理由：{event.reason}</Text>}
+          <Text fw={900}>{event.actor} 灏嗏€渰event.sourceTitle}鈥濇寚鍚?{event.target}</Text>
+          {event.reason && <Text size="sm" c="dimmed" mt={5}>鐞嗙敱锛歿event.reason}</Text>}
         </Paper>
       );
     }
@@ -750,16 +860,16 @@ function GamePage() {
       return (
         <Paper key={event.id} radius="lg" p="md" className="game-inquiry-event">
           <Text size="xs" c="blue.3" className="monospace-label">cross examination</Text>
-          <Text fw={900} mt={4}>{event.asker} → {event.target}</Text>
-          <Text size="sm" mt={6}>针对：{event.sourceTitle}</Text>
-          <Text size="sm" mt={6}>问：“{event.question}”</Text>
-          <Text size="sm" c="dimmed" mt={6}>答：“{event.answer}”</Text>
+          <Text fw={900} mt={4}>{event.asker} 鈫?{event.target}</Text>
+          <Text size="sm" mt={6}>閽堝锛歿event.sourceTitle}</Text>
+          <Text size="sm" mt={6}>闂細鈥渰event.question}鈥?/Text>
+          <Text size="sm" c="dimmed" mt={6}>绛旓細鈥渰event.answer}鈥?/Text>
         </Paper>
       );
     }
     return (
       <Paper key={event.id} radius="lg" p="sm" className={event.type === "private" ? "game-private-event" : "game-system-event"}>
-        <Text size="sm" fw={800}>{event.type === "private" ? `私聊申请 · ${event.agent}` : event.title}</Text>
+        <Text size="sm" fw={800}>{event.type === "private" ? `绉佽亰鐢宠 路 ${event.agent}` : event.title}</Text>
         <Text size="sm" c="dimmed">{event.text}</Text>
       </Paper>
     );
@@ -769,7 +879,7 @@ function GamePage() {
     if (phase.id === "role-selection") {
       return (
         <Stack gap="md">
-          <Group justify="space-between"><Box><Title order={3}>选择你的角色</Title><Text c="dimmed">查看公开身份与标签，确认后进入剧本阅读。</Text></Box><Badge>{roleConfirmed ? "已确认" : "待确认"}</Badge></Group>
+          <Group justify="space-between"><Box><Title order={3}>閫夋嫨浣犵殑瑙掕壊</Title><Text c="dimmed">鏌ョ湅鍏紑韬唤涓庢爣绛撅紝纭鍚庤繘鍏ュ墽鏈槄璇汇€?/Text></Box><Badge>{roleConfirmed ? "宸茬‘璁? : "寰呯‘璁?}</Badge></Group>
           <AgentCastingPanel
             roles={ROLE_OPTIONS}
             selectedPlayerRoleId={selectedRole}
@@ -780,49 +890,46 @@ function GamePage() {
             disabled={!selectedRole}
             onClick={confirmRoleSelection}
           >
-            {selectedRole ? "确认阵容并进入剧本" : "请先在圆桌中选择自己扮演的角色"}
+            {selectedRole ? "纭闃靛骞惰繘鍏ュ墽鏈? : "璇峰厛鍦ㄥ渾妗屼腑閫夋嫨鑷繁鎵紨鐨勮鑹?}
           </Button>
         </Stack>
       );
     }
     if (phase.id === "script-reading") {
-      const item = SCRIPT_CHAPTERS[chapter];
       return (
         <Stack gap="md">
           <Paper radius="xl" p="xl" className="game-reading-card">
-            <Text className="monospace-label" size="xs" c="red.3">private script / chapter {chapter + 1}</Text>
-            <Title order={2} mt="sm">{item.title}</Title>
+            <Text className="monospace-label" size="xs" c="red.3">backend script briefing</Text>
+            <Title order={2} mt="sm">{scriptTitle}</Title>
             <Text
               fz="lg"
               lh={1.9}
               mt="lg"
               className="game-script-selectable"
-              onMouseUp={() => captureScriptSelection(chapter)}
+              onMouseUp={() => captureScriptSelection(0)}
             >
-              {renderHighlightedScript(item.content, chapter)}
+              {renderHighlightedScript(scriptReadingContent || "后端暂未返回剧本正文。", 0)}
             </Text>
             <Group justify="space-between" mt="xl">
               <Text size="sm" c="dimmed">
-                选中剧本中的具体语句后，可保存为个人高亮。
-              </Text>
+                閫変腑鍓ф湰涓殑鍏蜂綋璇彞鍚庯紝鍙繚瀛樹负涓汉楂樹寒銆?              </Text>
               <Button
                 size="xs"
                 variant="light"
                 color="yellow"
                 leftSection={<IconHighlight size={15} />}
-                disabled={!selectedScriptText || selectedScriptChapter !== chapter}
+                disabled={!selectedScriptText}
                 onClick={addScriptHighlight}
               >
-                高亮选中文段
+                楂樹寒閫変腑鏂囨
               </Button>
             </Group>
           </Paper>
           <Group justify="space-between">
-            <Button variant="light" disabled={chapter === 0} onClick={() => setChapter((value) => value - 1)}>上一章节</Button>
-            <Text size="sm" c="dimmed">{chapter + 1} / {SCRIPT_CHAPTERS.length}</Text>
-            {chapter < SCRIPT_CHAPTERS.length - 1
-              ? <Button onClick={() => setChapter((value) => value + 1)}>下一章节</Button>
-              : <Button color="teal" leftSection={<IconCheck size={16} />} onClick={() => { setReadingDone(true); showFeedback("已确认阅读完成。"); }}>确认阅读完成</Button>}
+            <Text size="sm" c="dimmed">当前阶段直接展示完整后端剧本内容，不再按章节翻页。</Text>
+            <Button color="teal" leftSection={<IconCheck size={16} />} onClick={() => { setReadingDone(true); showFeedback("已确认阅读完成。"); }}>
+              纭闃呰瀹屾垚
+            </Button>
           </Group>
         </Stack>
       );
@@ -832,11 +939,11 @@ function GamePage() {
       return (
         <Stack gap="md">
           <Paper radius="xl" p="lg" className="game-speaker-control">
-            <Group justify="space-between"><Box><Text size="xs" c="dimmed">当前自我介绍</Text><Title order={3}>{introPlayer?.name || "全部完成"} · {introPlayer?.role}</Title></Box><Badge color="orange">{introduced.length} / 5 已完成</Badge></Group>
-            {introPlayer && <Text mt="md" c="dimmed">本阶段仅允许自我介绍和指定 Agent 自我介绍，不可出示证物、搜证或深入私聊。</Text>}
+            <Group justify="space-between"><Box><Text size="xs" c="dimmed">褰撳墠鑷垜浠嬬粛</Text><Title order={3}>{introPlayer?.name || "鍏ㄩ儴瀹屾垚"} 路 {introPlayer?.role}</Title></Box><Badge color="orange">{introduced.length} / 5 宸插畬鎴?/Badge></Group>
+            {introPlayer && <Text mt="md" c="dimmed">鏈樁娈典粎鍏佽鑷垜浠嬬粛鍜屾寚瀹?Agent 鑷垜浠嬬粛锛屼笉鍙嚭绀鸿瘉鐗┿€佹悳璇佹垨娣卞叆绉佽亰銆?/Text>}
           </Paper>
-          <Stack gap="xs">{events.filter((event) => event.type === "speech" && INTRO_LINES && Object.values(INTRO_LINES).includes(event.text)).map(renderEvent)}</Stack>
-          {introPlayer && <Button onClick={completeIntro}>{introPlayer.id === "user" ? "发言" : "下一位"}</Button>}
+          <Stack gap="xs">{events.filter((event) => event.type === "speech" && Object.values(introLines).includes(event.text)).map(renderEvent)}</Stack>
+          {introPlayer && <Button onClick={completeIntro}>{introPlayer.id === "user" ? "鍙戣█" : "涓嬩竴浣?}</Button>}
         </Stack>
       );
     }
@@ -844,23 +951,23 @@ function GamePage() {
       return (
         <Stack gap="md" align="center">
           <Paper radius="xl" p="xl" className="game-search-stage">
-            <IconSearch size={42} /><Title order={2} mt="md">随机搜证</Title><Text c="dimmed" mt="sm">剩余搜证次数：{searchesLeft}</Text>
+            <IconSearch size={42} /><Title order={2} mt="md">闅忔満鎼滆瘉</Title><Text c="dimmed" mt="sm">鍓╀綑鎼滆瘉娆℃暟锛歿searchesLeft}</Text>
             <Progress value={(2 - searchesLeft) * 50} mt="lg" color="orange" />
-            <Button size="lg" radius="xl" mt="xl" disabled={searchesLeft === 0} loading={false} onClick={randomSearch}>开始随机搜证</Button>
+            <Button size="lg" radius="xl" mt="xl" disabled={searchesLeft === 0} loading={false} onClick={randomSearch}>寮€濮嬮殢鏈烘悳璇?/Button>
           </Paper>
-          {newEvidence && <Paper radius="xl" p="lg" className="game-evidence-event"><Badge color="teal">新证物</Badge><Title order={3} mt="sm">{newEvidence.name}</Title><Text c="dimmed" mt="sm">{newEvidence.description}</Text><Text size="sm" mt="sm">默认公开范围：仅自己</Text></Paper>}
+          {newEvidence && <Paper radius="xl" p="lg" className="game-evidence-event"><Badge color="teal">鏂拌瘉鐗?/Badge><Title order={3} mt="sm">{newEvidence.name}</Title><Text c="dimmed" mt="sm">{newEvidence.description}</Text><Text size="sm" mt="sm">榛樿鍏紑鑼冨洿锛氫粎鑷繁</Text></Paper>}
         </Stack>
       );
     }
     if (phase.id === "vote") {
       return (
         <Stack gap="md">
-          <Paper radius="xl" p="lg" className="game-speaker-control"><Title order={3}>推理投票</Title><Text c="dimmed">新发言、私聊和证物出示已停止。请独立提交判断。</Text></Paper>
+          <Paper radius="xl" p="lg" className="game-speaker-control"><Title order={3}>鎺ㄧ悊鎶曠エ</Title><Text c="dimmed">鏂板彂瑷€銆佺鑱婂拰璇佺墿鍑虹ず宸插仠姝€傝鐙珛鎻愪氦鍒ゆ柇銆?/Text></Paper>
           {voteSubmitted ? (
-            <Paper radius="xl" p="xl" className="game-vote-success"><IconCheck size={44} /><Title order={2} mt="md">投票已提交</Title><Text c="dimmed" mt="sm">等待其他玩家与 Agent 完成独立推理。</Text></Paper>
+            <Paper radius="xl" p="xl" className="game-vote-success"><IconCheck size={44} /><Title order={2} mt="md">鎶曠エ宸叉彁浜?/Title><Text c="dimmed" mt="sm">绛夊緟鍏朵粬鐜╁涓?Agent 瀹屾垚鐙珛鎺ㄧ悊銆?/Text></Paper>
           ) : (
             <Paper radius="xl" p="lg" className="game-vote-form">
-              <Text fw={700}>选择嫌疑人</Text>
+              <Text fw={700}>閫夋嫨瀚岀枒浜?/Text>
               <Radio.Group value={voteSuspect} onChange={setVoteSuspect}>
                 <Box className="game-suspect-grid" mt="xs">
                   {GAME_PLAYERS.filter((player) => !player.agent && player.id !== "user").map((player) => (
@@ -877,16 +984,16 @@ function GamePage() {
                           <Text fw={900}>{player.role}</Text>
                           <Text size="xs" c="dimmed">{player.name}</Text>
                         </Box>
-                        <Radio value={player.id} aria-label={`选择 ${player.role}`} />
+                        <Radio value={player.id} aria-label={`閫夋嫨 ${player.role}`} />
                       </Group>
                     </Paper>
                   ))}
                 </Box>
               </Radio.Group>
-              <Textarea label="推理理由" mt="md" minRows={5} value={voteReason} onChange={(event) => setVoteReason(event.currentTarget.value)} />
-              <Text fw={700} mt="md">选择关键证物</Text>
+              <Textarea label="鎺ㄧ悊鐞嗙敱" mt="md" minRows={5} value={voteReason} onChange={(event) => setVoteReason(event.currentTarget.value)} />
+              <Text fw={700} mt="md">閫夋嫨鍏抽敭璇佺墿</Text>
               <Checkbox.Group value={voteEvidence} onChange={setVoteEvidence}><Stack gap="xs" mt="xs">{evidence.map((item) => <Checkbox key={item.id} value={item.id} label={item.name} />)}</Stack></Checkbox.Group>
-              <Button mt="xl" radius="xl" onClick={submitVote}>确认提交投票</Button>
+              <Button mt="xl" radius="xl" onClick={submitVote}>纭鎻愪氦鎶曠エ</Button>
             </Paper>
           )}
         </Stack>
@@ -896,13 +1003,13 @@ function GamePage() {
       <Stack gap="md">
         <Paper radius="xl" p="md" className={forcedAnswer ? "game-speaker-control is-forced" : "game-speaker-control"}>
           <Group justify="space-between" align="flex-start">
-            <Box><Text size="xs" c="dimmed">{forcedAnswer ? "强制回答中" : current ? "当前发言人" : "当前暂无角色发言"}</Text><Title order={3}>{current ? `${current.name} · ${current.role}` : `下一位：${playerById(queue[0])?.name || "等待申请"}`}</Title>{forcedAnswer && <Text size="sm" mt={5}>问题：{forcedAnswer.question}</Text>}</Box>
-            <Stack gap={4} align="flex-end"><Badge color={forcedAnswer ? "red" : "orange"} leftSection={<IconClock size={13} />}>{formatTime(speakerSeconds)}</Badge><Text size="xs" c="dimmed">队列：{queue.map((item) => playerById(item)?.name).join(" → ") || "空"}</Text></Stack>
+            <Box><Text size="xs" c="dimmed">{forcedAnswer ? "寮哄埗鍥炵瓟涓? : current ? "褰撳墠鍙戣█浜? : "褰撳墠鏆傛棤瑙掕壊鍙戣█"}</Text><Title order={3}>{current ? `${current.name} 路 ${current.role}` : `涓嬩竴浣嶏細${playerById(queue[0])?.name || "绛夊緟鐢宠"}`}</Title>{forcedAnswer && <Text size="sm" mt={5}>闂锛歿forcedAnswer.question}</Text>}</Box>
+            <Stack gap={4} align="flex-end"><Badge color={forcedAnswer ? "red" : "orange"} leftSection={<IconClock size={13} />}>{formatTime(speakerSeconds)}</Badge><Text size="xs" c="dimmed">闃熷垪锛歿queue.map((item) => playerById(item)?.name).join(" 鈫?") || "绌?}</Text></Stack>
           </Group>
-          <Group mt="md">{currentSpeaker && <Button size="xs" variant="light" onClick={finishSpeaker}>{current?.agent ? forcedAnswer ? "结束强制回答" : "跳过 Agent" : "结束发言"}</Button>}{current?.agent && <Button size="xs" variant="subtle">暂停 Agent</Button>}</Group>
+          <Group mt="md">{currentSpeaker && <Button size="xs" variant="light" onClick={finishSpeaker}>{current?.agent ? forcedAnswer ? "缁撴潫寮哄埗鍥炵瓟" : "璺宠繃 Agent" : "缁撴潫鍙戣█"}</Button>}{current?.agent && <Button size="xs" variant="subtle">鏆傚仠 Agent</Button>}</Group>
         </Paper>
-        <Paper className="game-scene-card" radius="xl"><Box className="game-scene-card__image" /><Stack className="game-scene-card__copy" gap="xs"><Badge color="red" variant="filled">DM 场景</Badge><Title order={3}>被雨水冲开的旧门</Title><Text c="gray.3">墙上的值班表缺失了一页，地面新鲜鞋印通向封死的 103 室。</Text></Stack></Paper>
-        <Group justify="space-between"><Text fw={900}>公共讨论与事件</Text><Badge variant="light">自动记录</Badge></Group>
+        <Paper className="game-scene-card" radius="xl"><Box className="game-scene-card__image" /><Stack className="game-scene-card__copy" gap="xs"><Badge color="red" variant="filled">{sceneCard.badge}</Badge><Title order={3}>{sceneCard.title}</Title><Text c="gray.3">{sceneCard.description || "鍚庣鏆傛湭杩斿洖鍦烘櫙鎻忚堪銆?}</Text></Stack></Paper>
+        <Paper className="game-scene-card" radius="xl"><Box className="game-scene-card__image" /><Stack className="game-scene-card__copy" gap="xs"><Badge color="red" variant="filled">{sceneCard.badge}</Badge><Title order={3}>{sceneCard.title}</Title><Text c="gray.3">{sceneCard.description || "后端暂未返回场景描述。"}</Text></Stack></Paper>
         <Stack gap="xs">{events.filter((event) => event.type !== "accusation").map(renderEvent)}</Stack>
       </Stack>
     );
@@ -911,15 +1018,15 @@ function GamePage() {
   const renderRightPanel = () => (
     <Tabs value={rightTab} onChange={setRightTab} className="game-right-tabs">
       <Tabs.List grow>
-        <Tabs.Tab value="script">剧本</Tabs.Tab><Tabs.Tab value="tasks">任务</Tabs.Tab><Tabs.Tab value="evidence">证物</Tabs.Tab><Tabs.Tab value="chat" className={privateInviteStatus === "未处理" || privateInviteStatus === "稍后处理" ? "game-chat-tab has-pending-invite" : "game-chat-tab"}>聊天 <Badge size="xs">{privateThreads.reduce((sum, item) => sum + item.unread, 0) + (privateInviteStatus === "未处理" || privateInviteStatus === "稍后处理" ? 1 : 0)}</Badge></Tabs.Tab>
+        <Tabs.Tab value="script">鍓ф湰</Tabs.Tab><Tabs.Tab value="tasks">浠诲姟</Tabs.Tab><Tabs.Tab value="evidence">璇佺墿</Tabs.Tab><Tabs.Tab value="chat" className={privateInviteStatus === "鏈鐞? || privateInviteStatus === "绋嶅悗澶勭悊" ? "game-chat-tab has-pending-invite" : "game-chat-tab"}>鑱婂ぉ <Badge size="xs">{privateThreads.reduce((sum, item) => sum + item.unread, 0) + (privateInviteStatus === "鏈鐞? || privateInviteStatus === "绋嶅悗澶勭悊" ? 1 : 0)}</Badge></Tabs.Tab>
       </Tabs.List>
       <ScrollArea className="game-right-tab-scroll" offsetScrollbars>
         <Tabs.Panel value="script" pt="md">
           <Stack gap="md">
             <Box>
               <Text className="monospace-label" size="xs" c="dimmed">my private script</Text>
-              <Title order={3}>周野的剧本</Title>
-              <Text size="sm" c="dimmed">可随时打开完整剧本，并管理已经保存的高亮文段。</Text>
+              <Title order={3}>鍛ㄩ噹鐨勫墽鏈?/Title>
+              <Text size="sm" c="dimmed">鍙殢鏃舵墦寮€瀹屾暣鍓ф湰锛屽苟绠＄悊宸茬粡淇濆瓨鐨勯珮浜枃娈点€?/Text>
             </Box>
             <Button
               fullWidth
@@ -927,11 +1034,11 @@ function GamePage() {
               leftSection={<IconBook2 size={17} />}
               onClick={() => setDialog("script")}
             >
-              打开我的剧本
+              鎵撳紑鎴戠殑鍓ф湰
             </Button>
             <Divider />
             <Group justify="space-between">
-              <Text fw={800}>已保存高亮</Text>
+              <Text fw={800}>宸蹭繚瀛橀珮浜?/Text>
               <Badge color="yellow" variant="light">{scriptHighlights.length}</Badge>
             </Group>
             {scriptHighlights.length > 0 ? (
@@ -940,14 +1047,14 @@ function GamePage() {
                   <Paper key={highlight.id} p="sm" radius="lg" className="game-highlight-summary">
                     <Group justify="space-between" align="flex-start" wrap="nowrap">
                       <Box>
-                        <Text size="xs" c="dimmed">{SCRIPT_CHAPTERS[highlight.chapter]?.title}</Text>
+                        <Text size="xs" c="dimmed">{scriptTitle}</Text>
                         <Text size="sm" mt={4}>{highlight.text}</Text>
                       </Box>
                       <ActionIcon
                         size="sm"
                         variant="subtle"
                         color="red"
-                        aria-label="删除高亮"
+                        aria-label="鍒犻櫎楂樹寒"
                         onClick={() => removeScriptHighlight(highlight.id)}
                       >
                         <IconX size={14} />
@@ -957,15 +1064,15 @@ function GamePage() {
                 ))}
               </Stack>
             ) : (
-              <Text size="sm" c="dimmed">尚未高亮任何剧本文段。</Text>
+              <Text size="sm" c="dimmed">灏氭湭楂樹寒浠讳綍鍓ф湰鏂囨銆?/Text>
             )}
           </Stack>
         </Tabs.Panel>
-        <Tabs.Panel value="tasks" pt="md"><Stack gap="sm">{[{ label: "主线任务", text: "找到原始门禁记录", done: evidence.some((item) => item.id === "duty-sheet") }, { label: "隐藏任务", text: "避免过早暴露数据删除交易", done: false }, { label: "阶段任务", text: phase.id === "search" ? "完成两次搜证" : "推进当前游戏阶段", done: phase.id === "search" && searchesLeft === 0 }].map((task) => <Paper key={task.label} p="sm" radius="lg" className="game-clue-item"><Group justify="space-between"><Text fw={800}>{task.label}</Text><Badge color={task.done ? "teal" : "gray"}>{task.done ? "已完成" : "进行中"}</Badge></Group><Text size="sm" c="dimmed" mt={5}>{task.text}</Text></Paper>)}</Stack></Tabs.Panel>
+        <Tabs.Panel value="tasks" pt="md"><Stack gap="sm">{[{ label: "涓荤嚎浠诲姟", text: "鎵惧埌鍘熷闂ㄧ璁板綍", done: evidence.some((item) => item.id === "duty-sheet") }, { label: "闅愯棌浠诲姟", text: "閬垮厤杩囨棭鏆撮湶鏁版嵁鍒犻櫎浜ゆ槗", done: false }, { label: "闃舵浠诲姟", text: phase.id === "search" ? "瀹屾垚涓ゆ鎼滆瘉" : "鎺ㄨ繘褰撳墠娓告垙闃舵", done: phase.id === "search" && searchesLeft === 0 }].map((task) => <Paper key={task.label} p="sm" radius="lg" className="game-clue-item"><Group justify="space-between"><Text fw={800}>{task.label}</Text><Badge color={task.done ? "teal" : "gray"}>{task.done ? "宸插畬鎴? : "杩涜涓?}</Badge></Group><Text size="sm" c="dimmed" mt={5}>{task.text}</Text></Paper>)}</Stack></Tabs.Panel>
         <Tabs.Panel value="evidence" pt="md">
           <Stack gap="md">
             <Group justify="space-between">
-              <Text fw={900}>我的证物</Text>
+              <Text fw={900}>鎴戠殑璇佺墿</Text>
               <Badge variant="light">{evidence.length}</Badge>
             </Group>
             <Stack gap="sm">
@@ -978,9 +1085,9 @@ function GamePage() {
                     <Badge size="xs">{item.visibility}</Badge>
                   </Group>
                   <Text size="sm" c="dimmed" mt={5}>{item.description}</Text>
-                  <Text size="xs" mt="sm">获得方式：{item.source}</Text>
+                  <Text size="xs" mt="sm">鑾峰緱鏂瑰紡锛歿item.source}</Text>
                   <Group gap={6} mt="sm">
-                    <Button size="compact-xs" variant="light" onClick={() => openEvidenceDetail(item)}>查看详情</Button>
+                    <Button size="compact-xs" variant="light" onClick={() => openEvidenceDetail(item)}>鏌ョ湅璇︽儏</Button>
                     <Button
                       size="compact-xs"
                       variant="light"
@@ -997,7 +1104,7 @@ function GamePage() {
                         setDialog("evidence");
                       }}
                     >
-                      出示证物
+                      鍑虹ず璇佺墿
                     </Button>
                   </Group>
                 </Paper>
@@ -1007,8 +1114,8 @@ function GamePage() {
             <Divider />
             <Group justify="space-between">
               <Box>
-                <Text fw={900}>已质询线索</Text>
-                <Text size="xs" c="dimmed">证据与关键发言的问答记录</Text>
+                <Text fw={900}>宸茶川璇㈢嚎绱?/Text>
+                <Text size="xs" c="dimmed">璇佹嵁涓庡叧閿彂瑷€鐨勯棶绛旇褰?/Text>
               </Box>
               <Badge color="blue" variant="light">{inquiryRecords.length}</Badge>
             </Group>
@@ -1018,25 +1125,25 @@ function GamePage() {
                   <Paper key={record.id} p="sm" radius="lg" className="game-inquiry-record">
                     <Group justify="space-between" align="flex-start">
                       <Box>
-                        <Badge size="xs" color={record.sourceType === "证据" ? "orange" : "blue"} variant="light">
+                        <Badge size="xs" color={record.sourceType === "璇佹嵁" ? "orange" : "blue"} variant="light">
                           {record.sourceType}
                         </Badge>
                         <Text fw={800} mt={5}>{record.sourceTitle}</Text>
                       </Box>
                       {record.evidence && (
                         <Button size="compact-xs" variant="subtle" onClick={() => openEvidenceDetail(record.evidence!)}>
-                          详情
+                          璇︽儏
                         </Button>
                       )}
                     </Group>
-                    <Text size="xs" c="dimmed" mt="sm">质询对象：{record.targetName}</Text>
-                    <Text size="sm" mt={6}>问：{record.question}</Text>
-                    <Text size="sm" c="dimmed" mt={6}>答：{record.answer}</Text>
+                    <Text size="xs" c="dimmed" mt="sm">璐ㄨ瀵硅薄锛歿record.targetName}</Text>
+                    <Text size="sm" mt={6}>闂細{record.question}</Text>
+                    <Text size="sm" c="dimmed" mt={6}>绛旓細{record.answer}</Text>
                   </Paper>
                 ))}
               </Stack>
             ) : (
-              <Text size="sm" c="dimmed">尚未对证据或关键发言发起质询。</Text>
+              <Text size="sm" c="dimmed">灏氭湭瀵硅瘉鎹垨鍏抽敭鍙戣█鍙戣捣璐ㄨ銆?/Text>
             )}
           </Stack>
         </Tabs.Panel>
@@ -1046,22 +1153,22 @@ function GamePage() {
               <Group justify="space-between" align="flex-start">
                 <Box>
                   <Group gap={6}>
-                    <Text fw={900}>白鸦 Agent 申请私聊</Text>
+                    <Text fw={900}>鐧介甫 Agent 鐢宠绉佽亰</Text>
                     <Badge
                       size="xs"
-                      color={privateInviteStatus === "未处理" || privateInviteStatus === "稍后处理" ? "orange" : privateInviteStatus === "已接受" ? "teal" : "gray"}
+                      color={privateInviteStatus === "鏈鐞? || privateInviteStatus === "绋嶅悗澶勭悊" ? "orange" : privateInviteStatus === "宸叉帴鍙? ? "teal" : "gray"}
                     >
                       {privateInviteStatus}
                     </Badge>
                   </Group>
-                  <Text size="sm" c="dimmed" mt={5}>“我发现门禁记录存在一个不适合公开讨论的时间矛盾。”</Text>
+                  <Text size="sm" c="dimmed" mt={5}>鈥滄垜鍙戠幇闂ㄧ璁板綍瀛樺湪涓€涓笉閫傚悎鍏紑璁ㄨ鐨勬椂闂寸煕鐩俱€傗€?/Text>
                 </Box>
               </Group>
-              {(privateInviteStatus === "未处理" || privateInviteStatus === "稍后处理") && (
+              {(privateInviteStatus === "鏈鐞? || privateInviteStatus === "绋嶅悗澶勭悊") && (
                 <Group gap={6} mt="sm">
-                  <Button size="compact-xs" onClick={() => { setPrivateInviteStatus("已接受"); acceptPrivateInvite("crow"); }}>允许</Button>
-                  <Button size="compact-xs" variant="light" onClick={() => setPrivateInviteStatus("稍后处理")}>稍后</Button>
-                  <Button size="compact-xs" variant="subtle" color="red" onClick={() => setPrivateInviteStatus("已拒绝")}>拒绝</Button>
+                  <Button size="compact-xs" onClick={() => { setPrivateInviteStatus("宸叉帴鍙?); acceptPrivateInvite("crow"); }}>鍏佽</Button>
+                  <Button size="compact-xs" variant="light" onClick={() => setPrivateInviteStatus("绋嶅悗澶勭悊")}>绋嶅悗</Button>
+                  <Button size="compact-xs" variant="subtle" color="red" onClick={() => setPrivateInviteStatus("宸叉嫆缁?)}>鎷掔粷</Button>
                 </Group>
               )}
             </Paper>
@@ -1074,8 +1181,8 @@ function GamePage() {
                 onClick={() => setChatHistoryOpen((value) => !value)}
               >
                 <Group gap="xs">
-                  <Text fw={900}>公共聊天与线索记录</Text>
-                  <Text size="xs" c="dimmed">{chatHistoryOpen ? "收起" : "展开"}</Text>
+                  <Text fw={900}>鍏叡鑱婂ぉ涓庣嚎绱㈣褰?/Text>
+                  <Text size="xs" c="dimmed">{chatHistoryOpen ? "鏀惰捣" : "灞曞紑"}</Text>
                 </Group>
                 <Badge variant="light">{events.filter((event) => ["speech", "evidence", "accusation", "inquiry"].includes(event.type)).length}</Badge>
               </Group>
@@ -1084,9 +1191,9 @@ function GamePage() {
                   {events.filter((event) => ["speech", "evidence", "accusation", "inquiry"].includes(event.type)).map((event) => (
                     <Paper key={`chat-${event.id}`} p="sm" radius="lg" className="game-chat-history-item">
                       {event.type === "speech" && <><Text fw={800}>{event.speaker}</Text><Text size="sm" c="dimmed">{event.text}</Text></>}
-                      {event.type === "evidence" && <><Text fw={800}>{event.speaker} 出示证据：{event.evidence.name}</Text><Text size="sm" c="dimmed">{event.reason || event.evidence.description}</Text></>}
-                      {event.type === "accusation" && <><Text fw={800}>怀疑记录</Text><Text size="sm" c="dimmed">{event.actor} 将“{event.sourceTitle}”指向 {event.target}{event.reason ? `：${event.reason}` : ""}</Text></>}
-                      {event.type === "inquiry" && <><Text fw={800}>质询记录 · {event.asker} → {event.target}</Text><Text size="sm">问：{event.question}</Text><Text size="sm" c="dimmed">答：{event.answer}</Text></>}
+                      {event.type === "evidence" && <><Text fw={800}>{event.speaker} 鍑虹ず璇佹嵁锛歿event.evidence.name}</Text><Text size="sm" c="dimmed">{event.reason || event.evidence.description}</Text></>}
+                      {event.type === "accusation" && <><Text fw={800}>鎬€鐤戣褰?/Text><Text size="sm" c="dimmed">{event.actor} 灏嗏€渰event.sourceTitle}鈥濇寚鍚?{event.target}{event.reason ? `锛?{event.reason}` : ""}</Text></>}
+                      {event.type === "inquiry" && <><Text fw={800}>璐ㄨ璁板綍 路 {event.asker} 鈫?{event.target}</Text><Text size="sm">闂細{event.question}</Text><Text size="sm" c="dimmed">绛旓細{event.answer}</Text></>}
                     </Paper>
                   ))}
                 </Stack>
@@ -1095,10 +1202,10 @@ function GamePage() {
 
             <Divider />
             <Box>
-              <Text fw={900} mb="xs">私聊会话</Text>
+              <Text fw={900} mb="xs">绉佽亰浼氳瘽</Text>
               <Group gap="xs" mb="sm">{privateThreads.map((thread) => <Button key={thread.id} size="xs" variant={thread.id === activeThreadId ? "filled" : "light"} onClick={() => { setActiveThreadId(thread.id); setPrivateThreads((items) => items.map((item) => item.id === thread.id ? { ...item, unread: 0 } : item)); }}>{thread.name}{thread.unread > 0 && ` (${thread.unread})`}</Button>)}</Group>
-              {activeThread ? <Stack gap="sm"><Text fw={900}>{activeThread.name}</Text><Stack gap="xs">{activeThread.messages.map((text, index) => <Paper key={index} p="sm" radius="lg" className="game-private-chat"><Text size="sm">{text}</Text></Paper>)}</Stack><TextInput value={privateMessage} onChange={(event) => setPrivateMessage(event.currentTarget.value)} placeholder="输入私聊内容…" rightSection={<ActionIcon onClick={sendPrivateMessage}><IconSend size={15} /></ActionIcon>} /></Stack> : <Text c="dimmed">暂无私聊会话。</Text>}
-            </Box>
+              {activeThread ? <Stack gap="sm"><Text fw={900}>{activeThread.name}</Text><Stack gap="xs">{activeThread.messages.map((text, index) => <Paper key={index} p="sm" radius="lg" className="game-private-chat"><Text size="sm">{text}</Text></Paper>)}</Stack><TextInput value={privateMessage} onChange={(event) => setPrivateMessage(event.currentTarget.value)} placeholder="杈撳叆绉佽亰鍐呭鈥? rightSection={<ActionIcon onClick={sendPrivateMessage}><IconSend size={15} /></ActionIcon>} /></Stack> : <Text c="dimmed">鏆傛棤绉佽亰浼氳瘽銆?/Text>}
+              {activeThread ? <Stack gap="sm"><Text fw={900}>{activeThread.name}</Text><Stack gap="xs">{activeThread.messages.map((text, index) => <Paper key={index} p="sm" radius="lg" className="game-private-chat"><Text size="sm">{text}</Text></Paper>)}</Stack><TextInput value={privateMessage} onChange={(event) => setPrivateMessage(event.currentTarget.value)} placeholder="输入私聊内容..." rightSection={<ActionIcon onClick={sendPrivateMessage}><IconSend size={15} /></ActionIcon>} /></Stack> : <Text c="dimmed">暂无私聊会话。</Text>}
           </Stack>
         </Tabs.Panel>
       </ScrollArea>
@@ -1106,25 +1213,25 @@ function GamePage() {
   );
 
   const footerActions = () => {
-    if (phase.id === "vote") return <Text c="dimmed">投票阶段：公共发言、私聊和证物操作已锁定。</Text>;
-    if (phase.id !== "discussion") return <Group><Button radius="xl" onClick={advancePhase} disabled={(phase.id === "role-selection" && !roleConfirmed) || (phase.id === "script-reading" && !readingDone) || (phase.id === "intro" && introduced.length < 5) || (phase.id === "search" && searchesLeft > 0)}>进入下一阶段</Button><Text size="sm" c="dimmed">完成当前阶段要求后继续</Text></Group>;
+    if (phase.id === "vote") return <Text c="dimmed">鎶曠エ闃舵锛氬叕鍏卞彂瑷€銆佺鑱婂拰璇佺墿鎿嶄綔宸查攣瀹氥€?/Text>;
+    if (phase.id !== "discussion") return <Group><Button radius="xl" onClick={advancePhase} disabled={(phase.id === "role-selection" && !roleConfirmed) || (phase.id === "script-reading" && !readingDone) || (phase.id === "intro" && introduced.length < 5) || (phase.id === "search" && searchesLeft > 0)}>杩涘叆涓嬩竴闃舵</Button><Text size="sm" c="dimmed">瀹屾垚褰撳墠闃舵瑕佹眰鍚庣户缁?/Text></Group>;
     return (
       <Group gap="xs" wrap="nowrap" style={{ width: "100%" }}>
-        {!isUserSpeaking && !userQueued && <Button radius="xl" onClick={joinQueue} disabled={Boolean(forcedAnswer)}>选择发言</Button>}
-        {userQueued && !isUserSpeaking && <Button radius="xl" variant="light" onClick={cancelQueue}>取消申请 · 排位 {queue.indexOf("user") + 1}</Button>}
-        {isUserSpeaking && <Button radius="xl" color="orange" onClick={finishSpeaker}>结束发言</Button>}
-        <Button radius="xl" variant="light" onClick={() => setDialog("private")}>发起私聊</Button>
-        <Button radius="xl" variant="light" disabled={!isUserSpeaking} onClick={() => setDialog("force")}>指定 Agent 回答</Button>
-        <Button radius="xl" variant="light" disabled={!isUserSpeaking} onClick={() => setDialog("evidence")}>出示证物</Button>
-        <Button radius="xl" variant="subtle" color="orange" disabled={Boolean(forcedAnswer)} onClick={() => goToPhase(5)}>进入推理投票</Button>
-        <TextInput value={publicMessage} onChange={(event) => setPublicMessage(event.currentTarget.value)} placeholder={isUserSpeaking ? "输入当前公共发言…" : "轮到你发言后可输入内容"} disabled={!isUserSpeaking} className="game-message-input" radius="xl" />
+        {!isUserSpeaking && !userQueued && <Button radius="xl" onClick={joinQueue} disabled={Boolean(forcedAnswer)}>閫夋嫨鍙戣█</Button>}
+        {userQueued && !isUserSpeaking && <Button radius="xl" variant="light" onClick={cancelQueue}>鍙栨秷鐢宠 路 鎺掍綅 {queue.indexOf("user") + 1}</Button>}
+        {isUserSpeaking && <Button radius="xl" color="orange" onClick={finishSpeaker}>缁撴潫鍙戣█</Button>}
+        <Button radius="xl" variant="light" onClick={() => setDialog("private")}>鍙戣捣绉佽亰</Button>
+        <Button radius="xl" variant="light" disabled={!isUserSpeaking} onClick={() => setDialog("force")}>鎸囧畾 Agent 鍥炵瓟</Button>
+        <Button radius="xl" variant="light" disabled={!isUserSpeaking} onClick={() => setDialog("evidence")}>鍑虹ず璇佺墿</Button>
+        <Button radius="xl" variant="subtle" color="orange" disabled={Boolean(forcedAnswer)} onClick={() => goToPhase(5)}>杩涘叆鎺ㄧ悊鎶曠エ</Button>
+        <TextInput value={publicMessage} onChange={(event) => setPublicMessage(event.currentTarget.value)} placeholder={isUserSpeaking ? "杈撳叆褰撳墠鍏叡鍙戣█鈥? : "杞埌浣犲彂瑷€鍚庡彲杈撳叆鍐呭"} disabled={!isUserSpeaking} className="game-message-input" radius="xl" />
         <ActionIcon size="lg" radius="xl" onClick={sendPublicMessage} disabled={!isUserSpeaking}><IconSend size={17} /></ActionIcon>
       </Group>
     );
   };
 
   return (
-    <StudioShell title="游戏主界面" subtitle={`当前剧本：${scriptTitle}。`} eyebrow="live game / interactive demo" stats={[{ label: "当前阶段", value: phase.shortLabel }, { label: "当前发言人", value: current?.name || "暂无" }, { label: "发言倒计时", value: formatTime(speakerSeconds) }, { label: "游戏模式", value: gameMode }]}>
+    <StudioShell title="娓告垙涓荤晫闈? subtitle={`褰撳墠鍓ф湰锛?{scriptTitle}銆俙} eyebrow="live game / interactive demo" stats={[{ label: "褰撳墠闃舵", value: phase.shortLabel }, { label: "褰撳墠鍙戣█浜?, value: current?.name || "鏆傛棤" }, { label: "鍙戣█鍊掕鏃?, value: formatTime(speakerSeconds) }, { label: "娓告垙妯″紡", value: gameMode }]}>
       <Box className="game-stage-wrap">
         <Paper ref={fullscreenRef} radius={fullscreen ? 0 : "xl"} className={fullscreen ? "game-workspace is-fullscreen" : "game-workspace"}>
           <header className="game-workspace__header game-workspace__header--expanded">
@@ -1141,41 +1248,41 @@ function GamePage() {
                       <Avatar size="sm" color={dm?.color || "red"}>{dm?.name.slice(0, 1)}</Avatar>
                       <Box className="game-dm-header-copy">
                         <Group gap={5}>
-                          <Text size="xs" fw={900}>DM · {dm?.role}</Text>
+                          <Text size="xs" fw={900}>DM 路 {dm?.role}</Text>
                           <Badge size="xs" color="red" variant="light">AI</Badge>
                         </Group>
-                        <Text size="xs" c="dimmed">{dm?.name} · 主持中</Text>
+                        <Text size="xs" c="dimmed">{dm?.name} 路 涓绘寔涓?/Text>
                         {feedback && <Text size="xs" className="game-dm-progress">{feedback}</Text>}
                       </Box>
                     </Group>
                   </Paper>
                 </Box>
                 <Box visibleFrom="sm">
-                  <Text size="xs" c="dimmed">当前发言 / 下一位</Text>
-                  <Text fw={800}>{current?.role || "暂无"} → {playerById(queue.find((item) => item !== currentSpeaker) || null)?.role || "等待申请"}</Text>
+                  <Text size="xs" c="dimmed">褰撳墠鍙戣█ / 涓嬩竴浣?/Text>
+                  <Text fw={800}>{current?.role || "鏆傛棤"} 鈫?{playerById(queue.find((item) => item !== currentSpeaker) || null)?.role || "绛夊緟鐢宠"}</Text>
                 </Box>
               </Group>
-              <Group gap="xs"><Badge size="lg" color="orange" leftSection={<IconClock size={13} />}>{formatTime(speakerSeconds)}</Badge><Button size="xs" variant="light" onClick={() => setDialog("rules")}>游戏规则</Button><Tooltip label={fullscreen ? "退出全屏" : "全屏"}><ActionIcon size="lg" onClick={toggleFullscreen}>{fullscreen ? <IconX size={18} /> : <IconMaximize size={18} />}</ActionIcon></Tooltip><ActionIcon size="lg" variant={settingsOpen ? "filled" : "light"} onClick={() => setSettingsOpen((value) => !value)}><IconSettings size={18} /></ActionIcon><Button size="xs" color="red" variant="subtle" onClick={() => navigate("/games")}>退出</Button></Group>
+              <Group gap="xs"><Badge size="lg" color="orange" leftSection={<IconClock size={13} />}>{formatTime(speakerSeconds)}</Badge><Button size="xs" variant="light" onClick={() => setDialog("rules")}>娓告垙瑙勫垯</Button><Tooltip label={fullscreen ? "閫€鍑哄叏灞? : "鍏ㄥ睆"}><ActionIcon size="lg" onClick={toggleFullscreen}>{fullscreen ? <IconX size={18} /> : <IconMaximize size={18} />}</ActionIcon></Tooltip><ActionIcon size="lg" variant={settingsOpen ? "filled" : "light"} onClick={() => setSettingsOpen((value) => !value)}><IconSettings size={18} /></ActionIcon><Button size="xs" color="red" variant="subtle" onClick={() => navigate("/games")}>閫€鍑?/Button></Group>
             </Group>
-            <Box className="game-phase-track">{GAME_PHASES.map((item, index) => <button key={item.id} disabled={index === 0 && roleConfirmed} className={`${index < phaseIndex ? "game-phase-step is-complete" : index === phaseIndex ? "game-phase-step is-active" : "game-phase-step"}${index === 0 && roleConfirmed ? " is-locked" : ""}`} onClick={() => goToPhase(index)}><span>{index < phaseIndex ? "✓" : index + 1}</span><Text size="xs">{item.shortLabel}</Text></button>)}</Box>
+            <Box className="game-phase-track">{GAME_PHASES.map((item, index) => <button key={item.id} disabled={index === 0 && roleConfirmed} className={`${index < phaseIndex ? "game-phase-step is-complete" : index === phaseIndex ? "game-phase-step is-active" : "game-phase-step"}${index === 0 && roleConfirmed ? " is-locked" : ""}`} onClick={() => goToPhase(index)}><span>{index < phaseIndex ? "鉁? : index + 1}</span><Text size="xs">{item.shortLabel}</Text></button>)}</Box>
           </header>
 
           {settingsOpen && (
             <Paper className="game-settings-strip game-settings-strip--phased" radius={0} px="lg" py="sm">
               <Group justify="space-between">
                 <Group gap="xs">
-                  <Badge variant="light">字幕：开启</Badge>
-                  <Badge variant="light">音效：70%</Badge>
-                  <Badge variant="light">Agent 节奏：适中</Badge>
+                  <Badge variant="light">瀛楀箷锛氬紑鍚?/Badge>
+                  <Badge variant="light">闊虫晥锛?0%</Badge>
+                  <Badge variant="light">Agent 鑺傚锛氶€備腑</Badge>
                 </Group>
-                <Text size="sm" c="dimmed">演示设置仅保存在当前页面状态。</Text>
+                <Text size="sm" c="dimmed">婕旂ず璁剧疆浠呬繚瀛樺湪褰撳墠椤甸潰鐘舵€併€?/Text>
               </Group>
             </Paper>
           )}
 
           <main className="game-workspace__body game-workspace__body--phased">
             <aside className="game-side-panel game-people-panel">
-              <Group justify="space-between" mb="md"><Group gap="xs"><IconUsers size={18} /><Text fw={900}>玩家与 Agent</Text></Group><Badge color="teal">6 在线</Badge></Group>
+              <Group justify="space-between" mb="md"><Group gap="xs"><IconUsers size={18} /><Text fw={900}>鐜╁涓?Agent</Text></Group><Badge color="teal">6 鍦ㄧ嚎</Badge></Group>
               <ScrollArea className="game-panel-scroll" offsetScrollbars>
                 <Stack gap="xs">
                   {GAME_PLAYERS.filter((player) => player.id !== "dm").map((player) => {
@@ -1194,18 +1301,18 @@ function GamePage() {
                           <Box style={{ flex: 1, minWidth: 0 }}>
                             <Group gap={5}>
                               <Text fw={900} truncate>{player.role}</Text>
-                              {isSelf && <Badge size="xs" color="orange" variant="filled">我</Badge>}
+                              {isSelf && <Badge size="xs" color="orange" variant="filled">鎴?/Badge>}
                             </Group>
-                            <Text size="xs" c="dimmed" truncate>玩家：{player.name}</Text>
+                            <Text size="xs" c="dimmed" truncate>鐜╁锛歿player.name}</Text>
                           </Box>
-                          <Badge size="xs" color={status === "正在发言" ? "orange" : status === "思考中" ? "blue" : "gray"} variant="dot">{status}</Badge>
+                          <Badge size="xs" color={status === "姝ｅ湪鍙戣█" ? "orange" : status === "鎬濊€冧腑" ? "blue" : "gray"} variant="dot">{status}</Badge>
                         </Group>
                       </Paper>
                     );
                   })}
                 </Stack>
               </ScrollArea>
-              {selectedPlayer && selectedPlayer.id !== "dm" && <Paper p="sm" radius="lg" className="game-player-actions"><Group justify="space-between"><Text fw={800}>{selectedPlayer.role} · 快捷操作</Text><Badge color={selectedPlayer.agent ? "blue" : "orange"} variant="light">{selectedPlayer.agent ? "AI 玩家" : "真人玩家"}</Badge></Group><Group gap={5} mt="sm"><Button size="xs" variant="light" onClick={() => showFeedback(`${selectedPlayer.role} 的公开身份：${selectedPlayer.publicIdentity}`)}>公开信息</Button>{selectedPlayer.id !== "user" && <Button size="xs" variant="light" onClick={() => { setTargetId(selectedPlayer.id); setDialog("private"); }}>发起私聊</Button>}{selectedPlayer.agent && <Button size="xs" variant="light" disabled={!isUserSpeaking} onClick={() => { setTargetId(selectedPlayer.id); setDialog("force"); }}>指定回答</Button>}</Group></Paper>}
+              {selectedPlayer && selectedPlayer.id !== "dm" && <Paper p="sm" radius="lg" className="game-player-actions"><Group justify="space-between"><Text fw={800}>{selectedPlayer.role} 路 蹇嵎鎿嶄綔</Text><Badge color={selectedPlayer.agent ? "blue" : "orange"} variant="light">{selectedPlayer.agent ? "AI 鐜╁" : "鐪熶汉鐜╁"}</Badge></Group><Group gap={5} mt="sm"><Button size="xs" variant="light" onClick={() => showFeedback(`${selectedPlayer.role} 鐨勫叕寮€韬唤锛?{selectedPlayer.publicIdentity}`)}>鍏紑淇℃伅</Button>{selectedPlayer.id !== "user" && <Button size="xs" variant="light" onClick={() => { setTargetId(selectedPlayer.id); setDialog("private"); }}>鍙戣捣绉佽亰</Button>}{selectedPlayer.agent && <Button size="xs" variant="light" disabled={!isUserSpeaking} onClick={() => { setTargetId(selectedPlayer.id); setDialog("force"); }}>鎸囧畾鍥炵瓟</Button>}</Group></Paper>}
             </aside>
 
             <section className="game-core-panel"><ScrollArea className="game-core-scroll" offsetScrollbars>{renderStage()}</ScrollArea></section>
@@ -1216,12 +1323,12 @@ function GamePage() {
         </Paper>
       </Box>
 
-      <Modal opened={dialog === "force"} onClose={() => setDialog(null)} title="指定 Agent 回答" centered><Stack><Select label="选择 Agent" value={targetId} onChange={(value) => setTargetId(value || "crow")} data={agents.map((agent) => ({ value: agent.id, label: `${agent.name} · ${agent.role}` }))} /><Textarea label="需要回答的问题" value={question} onChange={(event) => setQuestion(event.currentTarget.value)} minRows={4} /><Button onClick={confirmForcedAnswer}>确认指定</Button></Stack></Modal>
-      <Modal opened={dialog === "evidence"} onClose={() => setDialog(null)} title="出示证物" centered><Stack><Select label="选择证物" value={selectedEvidenceId} onChange={(value) => setSelectedEvidenceId(value || evidence[0]?.id)} data={evidence.map((item) => ({ value: item.id, label: item.name }))} /><Textarea label="出示理由" placeholder="说明这项证据支持或反驳了什么观点" value={evidenceReason} onChange={(event) => setEvidenceReason(event.currentTarget.value)} minRows={3} /><Radio.Group label="公开范围" value={evidenceVisibility} onChange={setEvidenceVisibility}><Stack mt="xs"><Radio value="所有人" label="公开给所有人" /><Radio value="指定角色" label="只分享给指定角色" /></Stack></Radio.Group>{evidenceVisibility === "指定角色" && <Select label="指定角色" value={targetId} onChange={(value) => setTargetId(value || "chen")} data={GAME_PLAYERS.filter((player) => player.id !== "user").map((player) => ({ value: player.id, label: player.name }))} />}<Button onClick={showEvidence}>确认出示</Button></Stack></Modal>
+      <Modal opened={dialog === "force"} onClose={() => setDialog(null)} title="鎸囧畾 Agent 鍥炵瓟" centered><Stack><Select label="閫夋嫨 Agent" value={targetId} onChange={(value) => setTargetId(value || "crow")} data={agents.map((agent) => ({ value: agent.id, label: `${agent.name} 路 ${agent.role}` }))} /><Textarea label="闇€瑕佸洖绛旂殑闂" value={question} onChange={(event) => setQuestion(event.currentTarget.value)} minRows={4} /><Button onClick={confirmForcedAnswer}>纭鎸囧畾</Button></Stack></Modal>
+      <Modal opened={dialog === "evidence"} onClose={() => setDialog(null)} title="鍑虹ず璇佺墿" centered><Stack><Select label="閫夋嫨璇佺墿" value={selectedEvidenceId} onChange={(value) => setSelectedEvidenceId(value || evidence[0]?.id)} data={evidence.map((item) => ({ value: item.id, label: item.name }))} /><Textarea label="鍑虹ず鐞嗙敱" placeholder="璇存槑杩欓」璇佹嵁鏀寔鎴栧弽椹充簡浠€涔堣鐐? value={evidenceReason} onChange={(event) => setEvidenceReason(event.currentTarget.value)} minRows={3} /><Radio.Group label="鍏紑鑼冨洿" value={evidenceVisibility} onChange={setEvidenceVisibility}><Stack mt="xs"><Radio value="鎵€鏈変汉" label="鍏紑缁欐墍鏈変汉" /><Radio value="鎸囧畾瑙掕壊" label="鍙垎浜粰鎸囧畾瑙掕壊" /></Stack></Radio.Group>{evidenceVisibility === "鎸囧畾瑙掕壊" && <Select label="鎸囧畾瑙掕壊" value={targetId} onChange={(value) => setTargetId(value || "chen")} data={GAME_PLAYERS.filter((player) => player.id !== "user").map((player) => ({ value: player.id, label: player.name }))} />}<Button onClick={showEvidence}>纭鍑虹ず</Button></Stack></Modal>
       <Modal
         opened={dialog === "evidence-detail"}
         onClose={() => setDialog(null)}
-        title="证据详情"
+        title="璇佹嵁璇︽儏"
         centered
         size="lg"
       >
@@ -1238,9 +1345,9 @@ function GamePage() {
               <Text lh={1.8}>{selectedDetailEvidence.description}</Text>
               <Divider my="md" />
               <Stack gap={6}>
-                <Group justify="space-between"><Text c="dimmed">发现地点</Text><Text fw={700}>{selectedDetailEvidence.location}</Text></Group>
-                <Group justify="space-between"><Text c="dimmed">记录时间</Text><Text fw={700}>{selectedDetailEvidence.time}</Text></Group>
-                <Group justify="space-between"><Text c="dimmed">获得方式</Text><Text fw={700}>{selectedDetailEvidence.source}</Text></Group>
+                <Group justify="space-between"><Text c="dimmed">鍙戠幇鍦扮偣</Text><Text fw={700}>{selectedDetailEvidence.location}</Text></Group>
+                <Group justify="space-between"><Text c="dimmed">璁板綍鏃堕棿</Text><Text fw={700}>{selectedDetailEvidence.time}</Text></Group>
+                <Group justify="space-between"><Text c="dimmed">鑾峰緱鏂瑰紡</Text><Text fw={700}>{selectedDetailEvidence.source}</Text></Group>
               </Stack>
             </Paper>
           </Stack>
@@ -1249,7 +1356,7 @@ function GamePage() {
       <Modal
         opened={dialog === "discussion-detail"}
         onClose={() => setDialog(null)}
-        title="公共讨论详情"
+        title="鍏叡璁ㄨ璇︽儏"
         centered
         size="xl"
       >
@@ -1265,12 +1372,12 @@ function GamePage() {
                     {selectedDiscussionSource.type === "evidence" ? "evidence statement" : "public statement"}
                   </Text>
                   <Title order={3}>{selectedDiscussionSource.speaker}</Title>
-                  {selectedDiscussionSpeaker && <Text size="sm" c="dimmed">{selectedDiscussionSpeaker.role} · {selectedDiscussionSpeaker.publicIdentity}</Text>}
+                  {selectedDiscussionSpeaker && <Text size="sm" c="dimmed">{selectedDiscussionSpeaker.role} 路 {selectedDiscussionSpeaker.publicIdentity}</Text>}
                 </Box>
               </Group>
               {selectedDiscussionSuspect && (
                 <Paper p="sm" radius="lg" className="game-discussion-suspect">
-                  <Text size="xs" c="dimmed">当前怀疑对象</Text>
+                  <Text size="xs" c="dimmed">褰撳墠鎬€鐤戝璞?/Text>
                   <Group gap="xs" mt={5}>
                     <Avatar size="sm" color={selectedDiscussionSuspect.color}>{selectedDiscussionSuspect.role.slice(0, 1)}</Avatar>
                     <Box>
@@ -1294,7 +1401,7 @@ function GamePage() {
               <Paper p="md" radius="lg" className="game-discussion-evidence">
                 <Box className="game-discussion-evidence-image">
                   <Text className="monospace-label" size="xs" c="dimmed">evidence image</Text>
-                  <Text c="dimmed">证据图片占位</Text>
+                  <Text c="dimmed">璇佹嵁鍥剧墖鍗犱綅</Text>
                 </Box>
                 <Box>
                   <Group justify="space-between">
@@ -1303,91 +1410,90 @@ function GamePage() {
                   </Group>
                   <Text size="sm" c="dimmed" mt="sm" lh={1.7}>{selectedDiscussionEvidence.description}</Text>
                   <Group gap="lg" mt="sm">
-                    <Text size="xs">地点：{selectedDiscussionEvidence.location}</Text>
-                    <Text size="xs">时间：{selectedDiscussionEvidence.time}</Text>
+                    <Text size="xs">鍦扮偣锛歿selectedDiscussionEvidence.location}</Text>
+                    <Text size="xs">鏃堕棿锛歿selectedDiscussionEvidence.time}</Text>
                   </Group>
                 </Box>
               </Paper>
             )}
 
             <Group justify="flex-end">
-              <Button variant="light" onClick={() => openPointDialog(selectedDiscussionSource.id)}>指向嫌疑人</Button>
+              <Button variant="light" onClick={() => openPointDialog(selectedDiscussionSource.id)}>鎸囧悜瀚岀枒浜?/Button>
               <Button color="blue" onClick={() => openInquiryDialog(selectedDiscussionSource.id)}>
-                {selectedDiscussionSource.type === "evidence" ? "针对此证据质询" : "针对此发言质询"}
+                {selectedDiscussionSource.type === "evidence" ? "閽堝姝よ瘉鎹川璇? : "閽堝姝ゅ彂瑷€璐ㄨ"}
               </Button>
             </Group>
           </Stack>
         )}
       </Modal>
-      <Modal opened={dialog === "point"} onClose={() => setDialog(null)} title="将线索指向嫌疑人" centered>
+      <Modal opened={dialog === "point"} onClose={() => setDialog(null)} title="灏嗙嚎绱㈡寚鍚戝珜鐤戜汉" centered>
         <Stack>
           <Text size="sm" c="dimmed">
-            来源：{discussionSource(selectedDiscussionEventId) ? discussionSourceTitle(discussionSource(selectedDiscussionEventId)!) : "未选择"}
+            鏉ユ簮锛歿discussionSource(selectedDiscussionEventId) ? discussionSourceTitle(discussionSource(selectedDiscussionEventId)!) : "鏈€夋嫨"}
           </Text>
           <Select
-            label="你怀疑谁"
+            label="浣犳€€鐤戣皝"
             value={pointTargetId}
             onChange={(value) => setPointTargetId(value || "chen")}
             data={GAME_PLAYERS.filter((player) => player.id !== "user" && player.id !== "dm").map((player) => ({
               value: player.id,
-              label: `${player.role} · ${player.name}`,
+              label: `${player.role} 路 ${player.name}`,
             }))}
           />
           <Textarea
-            label="怀疑理由（可选）"
+            label="鎬€鐤戠悊鐢憋紙鍙€夛級"
             value={pointReason}
             onChange={(event) => setPointReason(event.currentTarget.value)}
             minRows={3}
           />
-          <Button onClick={confirmPoint}>确认指向</Button>
+          <Button onClick={confirmPoint}>纭鎸囧悜</Button>
         </Stack>
       </Modal>
-      <Modal opened={dialog === "inquiry"} onClose={() => setDialog(null)} title="针对线索发起质询" centered size="lg">
+      <Modal opened={dialog === "inquiry"} onClose={() => setDialog(null)} title="閽堝绾跨储鍙戣捣璐ㄨ" centered size="lg">
         <Stack>
           <Text size="sm" c="dimmed">
-            质询来源：{discussionSource(selectedDiscussionEventId) ? discussionSourceTitle(discussionSource(selectedDiscussionEventId)!) : "未选择"}
+            璐ㄨ鏉ユ簮锛歿discussionSource(selectedDiscussionEventId) ? discussionSourceTitle(discussionSource(selectedDiscussionEventId)!) : "鏈€夋嫨"}
           </Text>
           <Select
-            label="质询对象"
+            label="璐ㄨ瀵硅薄"
             value={inquiryTargetId}
             onChange={(value) => setInquiryTargetId(value || "crow")}
             data={GAME_PLAYERS.filter((player) => player.id !== "user" && player.id !== "dm").map((player) => ({
               value: player.id,
-              label: `${player.role} · ${player.name}${player.agent ? " · AI" : " · 真人"}`,
+              label: `${player.role} 路 ${player.name}${player.agent ? " 路 AI" : " 路 鐪熶汉"}`,
             }))}
           />
           <Textarea
-            label="质询问题"
-            placeholder="说明这项证据或发言与你的疑问之间有什么关系"
+            label="璐ㄨ闂"
+            placeholder="璇存槑杩欓」璇佹嵁鎴栧彂瑷€涓庝綘鐨勭枒闂箣闂存湁浠€涔堝叧绯?
             value={inquiryQuestion}
             onChange={(event) => setInquiryQuestion(event.currentTarget.value)}
             minRows={4}
           />
-          <Button onClick={confirmInquiry}>发起质询并保存记录</Button>
+          <Button onClick={confirmInquiry}>鍙戣捣璐ㄨ骞朵繚瀛樿褰?/Button>
         </Stack>
       </Modal>
-      <Modal opened={dialog === "private"} onClose={() => setDialog(null)} title="发起或接受私聊" centered><Stack><Select label="私聊对象" value={targetId} onChange={(value) => setTargetId(value || "crow")} data={GAME_PLAYERS.filter((player) => player.id !== "user" && player.id !== "dm").map((player) => ({ value: player.id, label: `${player.role} · 玩家：${player.name}` }))} /><Text size="sm" c="dimmed">私聊建立后即可直接对话，不需要额外设置 Agent 发言权限；私聊内容和证物不会自动公开。</Text><Button onClick={() => acceptPrivateInvite()}>建立私聊</Button></Stack></Modal>
-      <Modal opened={dialog === "rules"} onClose={() => setDialog(null)} title="游戏规则" centered size="lg"><Stack><Text>公共讨论采用单一发言权，普通发言按申请顺序进行。</Text><Text>被指定回答的 Agent 必须成为下一位发言者，回答结束后恢复原队列。</Text><Text>私聊与公共讨论独立运行，私聊内容和证物仅参与者可见。</Text><Text>进入投票阶段后停止新的发言、私聊和证物出示。</Text></Stack></Modal>
+      <Modal opened={dialog === "private"} onClose={() => setDialog(null)} title="鍙戣捣鎴栨帴鍙楃鑱? centered><Stack><Select label="绉佽亰瀵硅薄" value={targetId} onChange={(value) => setTargetId(value || "crow")} data={GAME_PLAYERS.filter((player) => player.id !== "user" && player.id !== "dm").map((player) => ({ value: player.id, label: `${player.role} 路 鐜╁锛?{player.name}` }))} /><Text size="sm" c="dimmed">绉佽亰寤虹珛鍚庡嵆鍙洿鎺ュ璇濓紝涓嶉渶瑕侀澶栬缃?Agent 鍙戣█鏉冮檺锛涚鑱婂唴瀹瑰拰璇佺墿涓嶄細鑷姩鍏紑銆?/Text><Button onClick={() => acceptPrivateInvite()}>寤虹珛绉佽亰</Button></Stack></Modal>
+      <Modal opened={dialog === "rules"} onClose={() => setDialog(null)} title="娓告垙瑙勫垯" centered size="lg"><Stack><Text>鍏叡璁ㄨ閲囩敤鍗曚竴鍙戣█鏉冿紝鏅€氬彂瑷€鎸夌敵璇烽『搴忚繘琛屻€?/Text><Text>琚寚瀹氬洖绛旂殑 Agent 蹇呴』鎴愪负涓嬩竴浣嶅彂瑷€鑰咃紝鍥炵瓟缁撴潫鍚庢仮澶嶅師闃熷垪銆?/Text><Text>绉佽亰涓庡叕鍏辫璁虹嫭绔嬭繍琛岋紝绉佽亰鍐呭鍜岃瘉鐗╀粎鍙備笌鑰呭彲瑙併€?/Text><Text>杩涘叆鎶曠エ闃舵鍚庡仠姝㈡柊鐨勫彂瑷€銆佺鑱婂拰璇佺墿鍑虹ず銆?/Text></Stack></Modal>
       <Modal
         opened={dialog === "script"}
         onClose={() => {
           setDialog(null);
           setSelectedScriptText("");
         }}
-        title="我的剧本 · 周野"
+        title="鎴戠殑鍓ф湰 路 鍛ㄩ噹"
         centered
         size="xl"
         scrollAreaComponent={ScrollArea.Autosize}
       >
         <Stack gap="lg">
-          <Text size="sm" c="dimmed">拖动选中具体语句，再点击“高亮选中文段”。高亮会自动保存在当前浏览器。</Text>
-          {SCRIPT_CHAPTERS.map((item, chapterIndex) => (
-            <Paper key={item.title} radius="xl" p="lg" className="game-script-modal-chapter">
+          <Text size="sm" c="dimmed">鎷栧姩閫変腑鍏蜂綋璇彞锛屽啀鐐瑰嚮鈥滈珮浜€変腑鏂囨鈥濄€傞珮浜細鑷姩淇濆瓨鍦ㄥ綋鍓嶆祻瑙堝櫒銆?/Text>
+          {[{ title: scriptTitle, content: scriptReadingContent || "鍚庣鏆傛湭杩斿洖鍓ф湰姝ｆ枃銆? }].map((item, chapterIndex) => (
+          {[{ title: scriptTitle, content: scriptReadingContent || "后端暂未返回剧本正文。" }].map((item, chapterIndex) => (
               <Group justify="space-between" align="flex-start">
                 <Title order={3}>{item.title}</Title>
                 <Badge color="yellow" variant="light">
-                  {scriptHighlights.filter((highlight) => highlight.chapter === chapterIndex).length} 处高亮
-                </Badge>
+                  {scriptHighlights.filter((highlight) => highlight.chapter === chapterIndex).length} 澶勯珮浜?                </Badge>
               </Group>
               <Text
                 mt="md"
@@ -1403,27 +1509,27 @@ function GamePage() {
                   color="yellow"
                   variant="light"
                   leftSection={<IconHighlight size={15} />}
-                  disabled={!selectedScriptText || selectedScriptChapter !== chapterIndex}
+                  disabled={!selectedScriptText}
                   onClick={addScriptHighlight}
                 >
-                  高亮选中文段
+                  楂樹寒閫変腑鏂囨
                 </Button>
               </Group>
             </Paper>
           ))}
           {scriptHighlights.length > 0 && (
             <Box>
-              <Title order={4}>管理高亮</Title>
+              <Title order={4}>绠＄悊楂樹寒</Title>
               <Stack gap="xs" mt="sm">
                 {scriptHighlights.map((highlight) => (
                   <Paper key={highlight.id} radius="lg" p="sm" className="game-highlight-summary">
                     <Group justify="space-between" wrap="nowrap">
                       <Box>
-                        <Text size="xs" c="dimmed">{SCRIPT_CHAPTERS[highlight.chapter]?.title}</Text>
+                        <Text size="xs" c="dimmed">{scriptTitle}</Text>
                         <Text size="sm">{highlight.text}</Text>
                       </Box>
                       <Button size="xs" variant="subtle" color="red" onClick={() => removeScriptHighlight(highlight.id)}>
-                        删除
+                        鍒犻櫎
                       </Button>
                     </Group>
                   </Paper>
@@ -1438,7 +1544,7 @@ function GamePage() {
           className="game-intro-spotlight"
           role="button"
           tabIndex={0}
-          aria-label="关闭角色自我介绍"
+          aria-label="鍏抽棴瑙掕壊鑷垜浠嬬粛"
           onClick={() => setIntroSpotlight(null)}
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") setIntroSpotlight(null);
@@ -1446,18 +1552,18 @@ function GamePage() {
         >
           <Box className="game-intro-portrait" aria-hidden="true">
             <Text className="monospace-label" size="xs" c="dimmed">character portrait</Text>
-            <Text c="dimmed">角色立绘占位</Text>
+            <Text c="dimmed">瑙掕壊绔嬬粯鍗犱綅</Text>
           </Box>
           <Paper className="game-intro-speech" radius="xl" p="lg">
             <Group gap="sm">
               <Avatar color={introSpotlight.color}>{introSpotlight.role.slice(0, 1)}</Avatar>
               <Box>
                 <Title order={3}>{introSpotlight.role}</Title>
-                <Text size="sm" c="dimmed">{introSpotlight.name} · {introSpotlight.agent ? "AI 玩家" : "真人玩家"}</Text>
+                <Text size="sm" c="dimmed">{introSpotlight.name} 路 {introSpotlight.agent ? "AI 鐜╁" : "鐪熶汉鐜╁"}</Text>
               </Box>
             </Group>
-            <Text fz="lg" lh={1.8} mt="md">“{INTRO_LINES[introSpotlight.id]}”</Text>
-            <Text size="xs" c="dimmed" ta="center" mt="md">点击任意位置继续</Text>
+            <Text fz="lg" lh={1.8} mt="md">鈥渰introLines[introSpotlight.id]}鈥?/Text>
+            <Text size="xs" c="dimmed" ta="center" mt="md">鐐瑰嚮浠绘剰浣嶇疆缁х画</Text>
           </Paper>
         </Box>
       )}

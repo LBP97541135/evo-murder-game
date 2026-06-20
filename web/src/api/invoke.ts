@@ -461,10 +461,6 @@ export const generateCapsuleFromGene = (geneId: string) =>
   post<Record<string, any>>(`/capsules/genes/${geneId}/generate-capsule`);
 export const searchCapsules = (data: Record<string, any>) =>
   post<Array<Record<string, any>>>("/capsules/search", data);
-export const getCapsule = (capsuleId: string) =>
-  get<Record<string, any>>(`/capsules/capsules/${capsuleId}`);
-export const listCapsules = (filters: Record<string, QueryValue> = {}) =>
-  get<Array<Record<string, any>>>("/capsules/capsules", filters);
 export const deleteCapsule = (capsuleId: string) =>
   remove<Record<string, any>>(`/capsules/capsules/${capsuleId}`);
 export const consumeCapsules = (agentRole: string, signals?: string[], limit = 5) =>
@@ -478,3 +474,46 @@ export const reviewAndGenerateCapsules = (sessionId: string, scriptId = "") =>
 export function createSafeActorList(actors: Actor[]): SafeActor[] {
   return actors.map(({ secret: _secret, violation: _violation, backgroundImage: _background, ...actor }) => actor);
 }
+
+// ============================
+// 胶囊 API
+// ============================
+
+export interface CapsuleData {
+  id: string;
+  geneId: string;
+  publisherId: string;
+  publisherRole: string;
+  title: string;
+  category: string;
+  signals: string[];
+  applicableRoles: string[];
+  content: string;
+  strategy: string;
+  examples: string;
+  antiPatterns: string;
+  score: number;
+  usageCount: number;
+  effectiveness: number;
+  source: string;
+  reviewStatus: string;
+  reviewedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listCapsules = async (params?: {
+  category?: string;
+  publisherRole?: string;
+  reviewStatus?: string;
+  limit?: number;
+}): Promise<CapsuleData[]> => {
+  const query: Record<string, string | number | boolean | null | undefined> = {};
+  if (params?.category && params.category !== "all") query.category = params.category;
+  if (params?.publisherRole) query.publisher_role = params.publisherRole;
+  if (params?.reviewStatus) query.review_status = params.reviewStatus;
+  if (params?.limit) query.limit = params.limit;
+  return get<CapsuleData[]>("/capsules/capsules", query);
+};
+
+export const getCapsule = (capsuleId: string) => get<CapsuleData>(`/capsules/capsules/${capsuleId}`);

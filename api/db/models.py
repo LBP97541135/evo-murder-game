@@ -39,6 +39,7 @@ class Script(Base):
 
     # 分类标签
     theme = Column(String, default="modern")    # modern / ancient / horror / campus / ...
+    genre = Column(String, default="推理本")     # 情感本 / 推理本 / 机制本 / 阵营本
     difficulty = Column(String, default="medium")  # easy / medium / hard
     duration = Column(Integer, default=120)      # 预计时长（分钟）
     emotion_level = Column(Float, default=0.5)   # 情感浓度 0-1
@@ -406,8 +407,173 @@ class GameProgressRecord(Base):
 
 
 # ============================
-# 数据转换工具
+# 胶囊与基因（本地经验资产）
 # ============================
+
+class GeneRecord(Base):
+    """基因记录——一次策略执行的原始经验数据。"""
+    __tablename__ = "genes"
+
+    id = Column(String, primary_key=True)              # gene_xxx
+    agent_node_id = Column(String, ForeignKey("agent_nodes.id"), nullable=False)
+    session_id = Column(String, default="")            # 来源游戏会话
+    script_id = Column(String, default="")             # 来源剧本
+
+    # 经验信号（用于匹配搜索）
+    signals = Column(JSON, default=[])                 # ["role-playing", "inference", ...]
+    category = Column(String, default="")              # hosting / role-playing / inference / ...
+
+    # 经验内容
+    status = Column(String, default="success")         # success / failure / partial
+    score = Column(Float, default=0.0)                 # 0-1 自评分数
+    summary = Column(Text, default="")                 # 经验摘要
+    detail = Column(Text, default="")                  # 经验详情（完整复盘）
+
+    # DM 评审结果
+    dm_reviewed = Column(Boolean, default=False)        # DM 是否已评审
+    dm_score = Column(Float, default=0.0)              # DM 评分 0-1
+    dm_comment = Column(Text, default="")              # DM 评审意见
+    dm_suggestions = Column(Text, default="")          # DM 改进建议
+
+    # 胶囊关联
+    capsule_id = Column(String, default="")            # 关联的胶囊ID
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class CapsuleRecord(Base):
+    """胶囊记录——从高质量 Gene 提炼的普适经验资产。"""
+    __tablename__ = "capsules"
+
+    id = Column(String, primary_key=True)              # capsule_xxx
+    gene_id = Column(String, ForeignKey("genes.id"), default="")
+    publisher_id = Column(String, ForeignKey("agent_nodes.id"), nullable=False)
+    publisher_role = Column(String, nullable=False)    # dm / companion / assistant
+
+    # 胶囊元数据
+    title = Column(String, nullable=False)             # "DM控场节奏技巧"
+    category = Column(String, default="")              # hosting / role-playing / inference / ...
+    signals = Column(JSON, default=[])                 # 匹配信号标签
+    applicable_roles = Column(JSON, default=[])        # 适用角色 ["companion", "assistant"]
+
+    # 胶囊内容
+    content = Column(Text, nullable=False)             # 普适经验正文
+    strategy = Column(Text, default="")                # 具体策略/方法
+    examples = Column(Text, default="")                # 使用示例
+    anti_patterns = Column(Text, default="")           # 反面模式（避免什么）
+
+    # 质量与使用
+    score = Column(Float, default=0.0)                 # 综合评分（自评+DM评审加权）
+    usage_count = Column(Integer, default=0)           # 被使用次数
+    effectiveness = Column(Float, default=0.0)         # 使用后效果提升均值
+
+    # 来源
+    source = Column(String, default="local")           # local / evomap
+    evomap_asset_id = Column(String, default="")       # EvoMap 资产ID（如果已发布）
+
+    # 审核状态
+    review_status = Column(String, default="pending")  # pending / approved / rejected
+    reviewed_by = Column(String, default="")           # 评审者 node_id
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+
+# ============================
+# Agent 人设库
+# ============================
+
+class AgentPersona(Base):
+    """Agent 人设库——每个 Agent 的独立身份、性格、风格和背景。
+
+    与 AgentNode 的关系：AgentNode 是运行时实例，AgentPersona 是人设模板。
+    游戏开始时，Agent 从人设库加载自己的身份，融入 constitution 和 identity_doc。
+    """
+    __tablename__ = "agent_personas"
+
+    id = Column(String, primary_key=True)               # persona_xxx
+    key = Column(String, unique=True, nullable=False)    # 前端标识: white-crow / mist-harbor
+    name = Column(String, nullable=False)                # 人设名: 白鸦 / 雾港主理人
+    role = Column(String, nullable=False)                # companion / dm / assistant
+
+    # 人设核心
+    vibe = Column(Text, default="")                      # 气质一句话: "克制、清冷、会稳稳接话"
+    style = Column(Text, default="")                     # 风格描述: "适合推理链条和关键节点补刀"
+    genius = Column(JSON, default=[])                    # 擅长标签: ["推理", "线索整理", "新手引导"]
+    personality = Column(JSON, default=[])               # 性格标签: ["冷静", "耐心", "不抢戏"]
+    script_types = Column(JSON, default=[])              # 擅长剧本: ["推理本", "新手局"]
+    active_level = Column(String, default="中")           # 主动程度: 低/中/高（companion）
+    pace = Column(String, default="中")                   # 主持节奏: 快/中/慢（dm）
+
+    # DM 专属字段
+    strengths = Column(JSON, default=[])                 # DM 优势: ["氛围营造", "提示克制"]
+    prompt_style = Column(Text, default="")              # 提示风格: "提示偏间接，避免直接揭底"
+    fairness = Column(Text, default="")                  # 公平性描述
+
+    # 人设正文（注入 constitution 的核心内容）
+    persona_text = Column(Text, default="")              # 完整人设描述，用于生成 constitution
+    backstory = Column(Text, default="")                 # Agent 的个人背景故事
+    speech_style = Column(Text, default="")              # 说话风格/口癖
+    values = Column(JSON, default=[])                    # 核心价值观: ["诚实", "耐心", "公平"]
+    anti_patterns = Column(JSON, default=[])             # 反面模式: ["不抢话", "不剧透"]
+
+    # 匹配与推荐
+    role_match = Column(Text, default="")                # 适合角色位: "侦探位、辅助位与观察者位"
+    reason = Column(Text, default="")                    # 推荐理由
+
+    # 运行统计
+    rating = Column(Float, default=4.5)                  # 用户评分
+    history_count = Column(Integer, default=0)           # 历史协作/主持局数
+    recent_tags = Column(JSON, default=[])               # 最近新增标签
+
+    # 进化版本
+    version = Column(Integer, default=1)                 # 人设版本号
+    evolved_from = Column(String, default="")            # 从哪个版本进化而来
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+
+# ============================
+# Agent 游戏状态（运行时记忆 + 行动意图）
+# ============================
+
+class AgentGameStateModel(Base):
+    """Agent 游戏状态——每局每个 Agent 的运行时状态持久化。
+
+    存储记忆分层（chat_history/compressed_summary）、
+    行动意图（intents）、证物感知、进化观察缓冲区。
+    """
+    __tablename__ = "agent_game_states"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String, nullable=False, index=True)
+    agent_key = Column(String, nullable=False)           # "companion_白鸦"
+
+    # 身份层（开局注入，不变）
+    character_json = Column(JSON, default=dict)           # AssignedCharacter 全部字段
+    constitution = Column(Text, default="")               # 已被胶囊注入过的 constitution
+    all_actors_json = Column(JSON, default=list)           # SafeActor[]
+    global_story = Column(Text, default="")
+
+    # 记忆层（阶段结束时压缩）
+    chat_history_json = Column(JSON, default=list)         # LLMMessage[] 当前阶段
+    compressed_summary = Column(Text, default="")          # 上一阶段摘要（2-3句话）
+    key_facts_json = Column(JSON, default=list)            # 上一阶段关键事实
+    discovered_evidences_json = Column(JSON, default=list)  # 自己发现的证物（名称+摘要）
+
+    # 行动层
+    intents_json = Column(JSON, default=dict)              # 待玩家审批的行动意图
+
+    # 进化层
+    observation_buffer_json = Column(JSON, default=list)   # 本局观察到的事实
+    loaded_capsule_ids_json = Column(JSON, default=list)   # 本局加载的胶囊 ID
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
 
 def script_to_dict(script: Script) -> dict:
     """将数据库 Script 对象转换为前端字典格式。"""
@@ -471,6 +637,7 @@ def script_to_dict(script: Script) -> dict:
         "sourceType": script.source_type,
         "coverImage": cover,
         "coverImageFilename": script.cover_image_filename or "",
+        "genre": script.genre,
         "theme": script.theme,
         "difficulty": script.difficulty,
         "duration": script.duration,
@@ -516,6 +683,7 @@ def dict_to_script(data: dict, script: Optional["Script"] = None) -> "Script":
     script.source_type = data.get("sourceType", script.source_type)
 
     script.theme = data.get("theme", script.theme)
+    script.genre = data.get("genre") or data.get("themeGenre", script.theme) or script.genre
     script.difficulty = data.get("difficulty", script.difficulty)
     script.duration = data.get("duration", script.duration)
     script.emotion_level = data.get("emotionLevel", script.emotion_level)
@@ -754,7 +922,31 @@ def init_db():
     if db_dir and not os.path.exists(db_dir):
         os.makedirs(db_dir, exist_ok=True)
     Base.metadata.create_all(engine)
+
+    # 运行时 migration：检查并补充缺失的列
+    _run_migrations(engine)
+
     return engine
+
+
+def _run_migrations(engine):
+    """运行时迁移：给已有表补充新加的列（主要是 SQLite 不支持 ALTER ADD COLUMN IF NOT EXISTS）。"""
+    import re
+    try:
+        with engine.connect() as conn:
+            # 检查 scripts 表是否有 genre 列
+            result = conn.execute(
+                __import__("sqlalchemy").text("PRAGMA table_info(scripts)")
+            ).fetchall()
+            existing_cols = {row[1] for row in result}
+            if "genre" not in existing_cols:
+                conn.execute(
+                    __import__("sqlalchemy").text("ALTER TABLE scripts ADD COLUMN genre VARCHAR DEFAULT '推理本'")
+                )
+                conn.commit()
+                print("[migration] 已为 scripts 表添加 genre 列")
+    except Exception as e:
+        print(f"[migration] 运行时迁移失败（可忽略）: {e}")
 
 
 def get_session():

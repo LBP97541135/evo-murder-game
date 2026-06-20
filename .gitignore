@@ -5,6 +5,7 @@
 # --- 红线：绝不提交 ---
 .env
 *.db
+!data/murder_mystery.db
 murder_mystery.db
 
 # --- Python ---
@@ -41,7 +42,11 @@ node_secret
 
 # --- 数据文件 ---
 data/
+!data/murder_mystery.db
 *.sqlite3
 
 # --- 日志 ---
 *.log
+
+# --- 备份 ---
+backup/

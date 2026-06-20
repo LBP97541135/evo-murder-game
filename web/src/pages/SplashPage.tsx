@@ -1,11 +1,10 @@
 import React, { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-/* eslint-disable @typescript-eslint/no-var-requires */
-const titleImg  = require("../video/暗夜剧场字体.png") as string;
-const ctaImg    = require("../video/触碰以入局字体.png") as string;
-const videoSrc  = require("../video/开屏幕动画.mp4") as string;
-const posterImg = require("../video/首帧画面.png") as string;
+const titleImg = new URL("../video/暗夜剧场字体.png", import.meta.url).href;
+const ctaImg = new URL("../video/触碰以入局字体.png", import.meta.url).href;
+const videoSrc = new URL("../video/开屏幕动画.mp4", import.meta.url).href;
+const posterImg = new URL("../video/首帧画面.png", import.meta.url).href;
 
 type Phase = "idle" | "playing" | "ended";
 

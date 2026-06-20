@@ -1,10 +1,17 @@
 import React, { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+<<<<<<< HEAD
+const titleImg = new URL("../video/暗夜剧场字体.png", import.meta.url).href;
+const ctaImg = new URL("../video/触碰以入局字体.png", import.meta.url).href;
+const videoSrc = new URL("../video/开屏幕动画.mp4", import.meta.url).href;
+const posterImg = new URL("../video/首帧画面.png", import.meta.url).href;
+=======
 import titleImg  from "../video/暗夜剧场字体.png";
 import ctaImg    from "../video/触碰以入局字体.png";
 import videoSrc  from "../video/开屏幕动画.mp4";
 import posterImg from "../video/首帧画面.png";
+>>>>>>> 4c64625f1d6eed53c2a94e288ce49b13dc12dc6c
 
 type Phase = "idle" | "playing" | "ended";
 

@@ -81,7 +81,7 @@ export function SplashPage() {
         <div
           style={{
             position: "absolute",
-            top: "30%",
+            top: "50%",
             left: "50%",
             transform: "translateX(-50%)",
           }}

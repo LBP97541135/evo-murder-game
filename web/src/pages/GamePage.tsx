@@ -1809,7 +1809,13 @@ function GamePage() {
 
     const chatMessages: LLMMessage[] = [{
       role: "user",
-      content: `玩家私聊对你说："${content}"\n（这是私聊，公共讨论听不到。请以角色身份自然回复，不要泄露角色秘密，可以回避或转移话题。）`,
+      content: (
+        `【私聊】玩家对你说：「${content}」\n`
+        + `你是陪玩 Agent「${targetPlayer.name}」，正在本局中扮演剧本角色「${targetPlayer.role}」。\n`
+        + `请以 Agent 人设（${targetPlayer.name}）+ 剧本角色（${targetPlayer.role}）的身份用第一人称回复。\n`
+        + `玩家是在对你（${targetPlayer.name}）说话，不要把自己当成旁观者在评论「${targetPlayer.name}」。\n`
+        + `这是私聊，公共讨论听不到。不要泄露角色 secret，可自然回避或转移话题。`
+      ),
     }];
 
     const req: InvocationRequest = {

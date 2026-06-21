@@ -1,18 +1,25 @@
 import { API_URL } from "../constants";
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: {
-      Accept: "application/json",
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...options.headers,
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`${path} 返回 ${response.status}`);
+async function request<T>(path: string, options: RequestInit = {}, timeoutMs = 600000): Promise<T> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${API_URL}${path}`, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...options.headers,
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`${path} 返回 ${response.status}`);
+    }
+    return response.json() as Promise<T>;
+  } finally {
+    window.clearTimeout(timer);
   }
-  return response.json() as Promise<T>;
 }
 
 export type ScoreDimensionKey =
@@ -92,6 +99,7 @@ export interface GameReviewBundle {
     errors?: string[];
   };
   message?: string;
+  review_status?: string;
 }
 
 export const getGameReview = (sessionId: string) =>

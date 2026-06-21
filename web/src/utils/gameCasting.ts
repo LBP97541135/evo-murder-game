@@ -234,7 +234,7 @@ export function buildCastPayload(
     const assignment = assignments.find((item) => item.roleId === role.id);
     if (!assignment || assignment.assignee.startsWith("seat-")) continue;
     if (assignment.assignee === HUMAN_PLAYER) {
-      payload.push({ type: "player", role: role.role, agentKey: "" });
+      payload.push({ type: "human", role: role.role, agentKey: "" });
     } else {
       payload.push({ type: "agent", role: role.role, agentKey: assignment.assignee });
     }

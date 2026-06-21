@@ -79,6 +79,24 @@ const SCORE_DIMENSIONS: Array<{
   { key: "reasoningAccuracy", label: "推理准确度", icon: <IconBrain size={16} />, description: "最终结论与真相的接近程度" },
 ];
 
+const agentPortraits: Record<string, string> = {
+  "白鸦": new URL("../video_picture/白鸽.png", import.meta.url).href,
+  "回声": new URL("../video_picture/回声.png", import.meta.url).href,
+  "纸鸮": new URL("../video_picture/纸鸮.png", import.meta.url).href,
+  "燧石": new URL("../video_picture/燧石.png", import.meta.url).href,
+  "月蛾": new URL("../video_picture/月蛾.png", import.meta.url).href,
+  "影织者": new URL("../video_picture/影织者.png", import.meta.url).href,
+  "夜蝉": new URL("../video_picture/夜蝉.png", import.meta.url).href,
+};
+
+const CATEGORY_ICONS: Record<string, React.ReactNode> = {
+  reasoning: <IconBrain size={14} />,
+  "role-playing": <IconHeart size={14} />,
+  hosting: <IconStarFilled size={14} />,
+  collaboration: <IconUsers size={14} />,
+  strategy: <IconBulb size={14} />,
+};
+
 const CATEGORY_COLORS: Record<string, string> = {
   reasoning: "blue",
   "role-playing": "grape",
@@ -86,6 +104,61 @@ const CATEGORY_COLORS: Record<string, string> = {
   collaboration: "green",
   strategy: "red",
 };
+
+function geneIdOf(gene?: ReviewGene) {
+  return gene?.gene_id || gene?.id || "";
+}
+
+function pairGenesAndCapsules(genes: ReviewGene[], capsules: ReviewCapsule[]) {
+  const capByGeneId = new Map<string, ReviewCapsule>();
+  const capByAgent = new Map<string, ReviewCapsule>();
+  for (const cap of capsules) {
+    if (cap.geneId) capByGeneId.set(cap.geneId, cap);
+    if (cap.agent_key) capByAgent.set(cap.agent_key, cap);
+  }
+
+  const rows: Array<{ key: string; gene?: ReviewGene; capsule?: ReviewCapsule }> = [];
+  const usedCaps = new Set<string>();
+
+  for (const gene of genes) {
+    const gid = geneIdOf(gene);
+    const capsule =
+      (gid && capByGeneId.get(gid))
+      || (gene.agent_key && capByAgent.get(gene.agent_key))
+      || capsules.find((c) => c.geneId === gid);
+    if (capsule) usedCaps.add(capsule.id);
+    rows.push({
+      key: gid || gene.agent_key || gene.agent_name || "unknown",
+      gene,
+      capsule,
+    });
+  }
+
+  for (const cap of capsules) {
+    if (usedCaps.has(cap.id)) continue;
+    rows.push({
+      key: cap.geneId || cap.agent_key || cap.id,
+      capsule: cap,
+    });
+  }
+
+  return rows;
+}
+
+function isReviewReady(data: GameReviewBundle) {
+  if (!data.success) return false;
+  if (data.review_status === "generating") return false;
+  const geneCount = data.genes?.length ?? 0;
+  const capCount = data.capsules?.length ?? 0;
+  if (geneCount === 0 && capCount === 0) return false;
+  if (geneCount > 0 && capCount === 0) return false;
+  return true;
+}
+
+function capsuleScorePercent(score?: number) {
+  const value = score ?? 0;
+  return value <= 1 ? value * 100 : value;
+}
 
 function getScoreColor(score: number): string {
   if (score >= 90) return "yellow";
@@ -123,6 +196,16 @@ function categoryLabel(cat?: string) {
   return map[cat || ""] || cat || "经验";
 }
 
+const EXCLUDED_SCORE_ROLES = new Set(["侦探", "DM", "雾港主理人", "dm", "host", "narrator"]);
+
+function isExcludedScoreRole(roleName?: string) {
+  const name = (roleName || "").trim();
+  if (!name) return true;
+  if (EXCLUDED_SCORE_ROLES.has(name)) return true;
+  const lower = name.toLowerCase();
+  return lower === "dm" || lower === "host" || lower === "detective";
+}
+
 export function ReviewPage() {
   const navigate = useNavigate();
   const { id = "xiutie-avenue-missing-three-minutes" } = useParams();
@@ -146,9 +229,42 @@ export function ReviewPage() {
     }
     setError("");
     setLoading(true);
+
+    const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
     try {
-      const data = generate ? await runGameReview(sessionId) : await getGameReview(sessionId);
-      if (!generate && data.message === "review_not_generated") {
+      if (generate) {
+        setRunning(true);
+        const generated = await runGameReview(sessionId);
+        setBundle(generated);
+        return;
+      }
+
+      let data = await getGameReview(sessionId);
+
+      if (data.message === "review_generating") {
+        setRunning(true);
+        for (let attempt = 0; attempt < 120; attempt += 1) {
+          await sleep(3000);
+          data = await getGameReview(sessionId);
+          if (isReviewReady(data)) {
+            setBundle(data);
+            return;
+          }
+          if (data.message !== "review_generating") break;
+        }
+        if (data.success) {
+          setBundle(data);
+        } else {
+          setError("复盘仍在生成中，请稍后再刷新；或点击下方按钮手动触发。");
+        }
+        return;
+      }
+
+      const needsGenerate = data.message === "review_not_generated"
+        || ((data.genes?.length ?? 0) === 0 && (data.capsules?.length ?? 0) === 0);
+
+      if (needsGenerate) {
         setRunning(true);
         const generated = await runGameReview(sessionId);
         setBundle(generated);
@@ -167,23 +283,18 @@ export function ReviewPage() {
     void loadReview(false);
   }, [loadReview]);
 
-  const scores = bundle?.character_scores || [];
+  const scores = React.useMemo(
+    () => (bundle?.character_scores || []).filter((item) => !isExcludedScoreRole(item.role_name)),
+    [bundle?.character_scores],
+  );
   const truth = bundle?.truth_review;
   const capsules = bundle?.capsules || [];
   const genes = bundle?.genes || [];
 
-  const evolutionRows = React.useMemo(() => {
-    const byAgent = new Map<string, { gene?: ReviewGene; capsule?: ReviewCapsule }>();
-    for (const gene of genes) {
-      const key = gene.agent_key || gene.agent_name || gene.id || gene.gene_id || "unknown";
-      byAgent.set(key, { ...(byAgent.get(key) || {}), gene });
-    }
-    for (const cap of capsules) {
-      const key = cap.agent_key || cap.agent_name || cap.geneId || cap.id;
-      byAgent.set(key, { ...(byAgent.get(key) || {}), capsule: cap });
-    }
-    return Array.from(byAgent.entries()).map(([key, row]) => ({ key, ...row }));
-  }, [genes, capsules]);
+  const evolutionRows = React.useMemo(
+    () => pairGenesAndCapsules(genes, capsules),
+    [genes, capsules],
+  );
 
   const highestRole = React.useMemo(() => {
     if (!scores.length) return "";
@@ -296,14 +407,10 @@ export function ReviewPage() {
             <Tabs.Panel value="table" pt="md">
               <Paper radius="xl" p="xl" className="industrial-card">
                 <Stack gap="lg" align="center">
-                  <Title order={3}>DM 综合评分圆桌</Title>
-                  <Text size="sm" c="dimmed">仅对玩家与陪玩角色评分，DM 主持位不参与。</Text>
+                  <Title order={3}>本局评分圆桌</Title>
+                  <Text size="sm" c="dimmed">仅展示玩家与陪玩角色的评分，主持位不参与。</Text>
                   <Box className="round-table" style={{ width: 420, height: 420 }}>
                     <Box className="round-table__surface" />
-                    <Box style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", textAlign: "center", zIndex: 5 }}>
-                      <Avatar src={dmPortrait} size={64} radius="xl" style={{ border: "3px solid rgba(250,82,82,0.45)" }} />
-                      <Text size="xs" c="dimmed" mt={2}>DM</Text>
-                    </Box>
                     {scores.map((item, index) => {
                       const pos = getSeatPosition(index, scores.length);
                       const isTop = item.role_name === highestRole;
@@ -344,64 +451,131 @@ export function ReviewPage() {
             <Tabs.Panel value="capsules" pt="md">
               <Paper radius="xl" p="xl" className="industrial-card">
                 <Stack gap="lg">
-                  <Group justify="space-between">
-                    <Title order={3}>本局基因 · 胶囊</Title>
+                  <Group justify="space-between" align="flex-start" wrap="wrap">
+                    <Box>
+                      <Group gap="xs">
+                        <IconDna size={18} color="#fbbf24" />
+                        <Text className="monospace-label" size="xs" c="yellow.3">
+                          gene capsule dashboard
+                        </Text>
+                      </Group>
+                      <Title order={3} mt={4}>基因胶囊 · 经验可视化</Title>
+                      <Text size="sm" c="dimmed" mt={4} maw={640} lh={1.7}>
+                        陪玩 Agent 听取 DM 复盘后自我分析 → 生成 Gene → DM 评审 → 提炼 Capsule。
+                        仅本局参与的 Agent 会产出胶囊。
+                      </Text>
+                    </Box>
                     <Group gap="xs">
-                      <Badge color="grape" variant="light">{genes.length} 基因</Badge>
-                      <Badge color="yellow" variant="light">{capsules.length} 胶囊</Badge>
+                      <Badge color="grape" variant="light" size="lg">{genes.length} 基因</Badge>
+                      <Badge color="yellow" variant="light" size="lg">{capsules.length} 胶囊</Badge>
                     </Group>
                   </Group>
-                  <Text size="sm" c="dimmed" lh={1.7}>
-                    流程：陪玩 Agent 听取 DM 真相复盘后自我分析 → 生成 Gene → DM 评审 → 提炼 Capsule（未达入库标准也会在本页展示）。
-                    DM 不参与评分与自进化。
-                  </Text>
+
                   {evolutionRows.length === 0 ? (
-                    <Text c="dimmed">暂无基因/胶囊，请点击下方重新生成或完成对局后自动触发。</Text>
-                  ) : (
-                    <Stack gap="md">
-                      {evolutionRows.map(({ key, gene, capsule }) => (
-                        <Card key={key} radius="lg" className="tone-panel" p="md">
-                          <Group justify="space-between" mb="sm">
-                            <Text fw={700}>{gene?.agent_name || capsule?.agent_name || key}</Text>
-                            <Group gap={6}>
-                              {gene ? <Badge size="sm" color="grape" variant="light">Gene</Badge> : null}
-                              {capsule ? (
-                                <Badge size="sm" color={capsule.stored_in_db === false ? "gray" : "yellow"} variant="light">
-                                  {capsule.stored_in_db === false ? "胶囊（仅展示）" : "胶囊（已入库）"}
-                                </Badge>
-                              ) : null}
-                            </Group>
-                          </Group>
-                          {gene ? (
-                            <Stack gap={4} mb="sm">
-                              <Text size="sm" fw={600}>{gene.summary || "（无摘要）"}</Text>
-                              <Text size="xs" c="dimmed" lineClamp={4}>{gene.detail}</Text>
-                              {gene.dmComment ? (
-                                <Text size="xs" c="orange.3">DM 评审：{gene.dmComment}</Text>
-                              ) : null}
-                            </Stack>
-                          ) : null}
-                          {capsule ? (
-                            <Card
-                              radius="md"
-                              p="sm"
-                              className="ambient-grid"
-                              style={{ cursor: "pointer" }}
-                              onClick={() => setSelectedCapsule(capsule)}
-                            >
-                              <Badge color={CATEGORY_COLORS[capsule.category || ""] || "gray"} size="sm">
-                                {categoryLabel(capsule.category)}
-                              </Badge>
-                              <Text fw={700} size="sm" mt="sm">{capsule.title}</Text>
-                              <Text size="xs" c="dimmed" lineClamp={3} mt={4}>{capsule.content}</Text>
-                              <Badge size="xs" variant="light" mt="sm">评分 {(capsule.score ?? 0).toFixed(2)}</Badge>
-                            </Card>
-                          ) : (
-                            <Text size="xs" c="dimmed">胶囊生成中或失败，请重新运行复盘。</Text>
-                          )}
-                        </Card>
-                      ))}
+                    <Stack gap="xs">
+                      <Text c="dimmed">暂无基因/胶囊，请点击下方「重新运行复盘与胶囊生成」。</Text>
+                      {bundle.evolution_summary?.errors?.length ? (
+                        <Text size="sm" c="orange.3">
+                          生成日志：{bundle.evolution_summary.errors.join("；")}
+                        </Text>
+                      ) : null}
                     </Stack>
+                  ) : (
+                    <Box className="agent-masonry">
+                      {evolutionRows.map(({ key, gene, capsule }) => {
+                        const agentName = gene?.agent_name || capsule?.agent_name || key;
+                        const portrait = agentPortraits[agentName];
+                        const capScore = capsuleScorePercent(capsule?.score);
+                        return (
+                          <Box key={key} className="agent-masonry__item">
+                            <Card radius="lg" className="evolution-card tone-panel" p={0}>
+                              <Box className="evolution-card__header" p="md">
+                                <Group justify="space-between" wrap="nowrap">
+                                  <Group gap="sm" wrap="nowrap">
+                                    <Avatar src={portrait} size={44} radius="xl" color="grape">
+                                      {agentName.slice(0, 1)}
+                                    </Avatar>
+                                    <Box>
+                                      <Text fw={700} size="sm">{agentName}</Text>
+                                      <Text size="xs" c="dimmed">Gene → Capsule</Text>
+                                    </Box>
+                                  </Group>
+                                  <Group gap={6}>
+                                    {gene ? <Badge size="xs" color="grape" variant="dot">Gene</Badge> : null}
+                                    {capsule ? (
+                                      <Badge
+                                        size="xs"
+                                        color={capsule.stored_in_db === false ? "gray" : "yellow"}
+                                        variant="dot"
+                                      >
+                                        {capsule.stored_in_db === false ? "预览" : "已入库"}
+                                      </Badge>
+                                    ) : null}
+                                  </Group>
+                                </Group>
+                              </Box>
+
+                              {gene ? (
+                                <Box className="evolution-card__gene" px="md" pb="sm">
+                                  <Text size="xs" className="monospace-label" c="grape.3" mb={4}>raw gene</Text>
+                                  <Text size="sm" fw={600} lh={1.5}>{gene.summary || "（无摘要）"}</Text>
+                                  <Text size="xs" c="dimmed" lineClamp={3} mt={4}>{gene.detail}</Text>
+                                  {gene.dmComment ? (
+                                    <Text size="xs" c="orange.3" mt={6}>DM：{gene.dmComment}</Text>
+                                  ) : null}
+                                </Box>
+                              ) : null}
+
+                              <Box className="evolution-card__arrow" px="md" py={4}>
+                                <IconDna size={16} style={{ opacity: 0.45 }} />
+                              </Box>
+
+                              {capsule ? (
+                                <Box
+                                  className="evolution-card__capsule ambient-grid"
+                                  p="md"
+                                  style={{ cursor: "pointer" }}
+                                  onClick={() => setSelectedCapsule(capsule)}
+                                >
+                                  <Group justify="space-between" mb="xs">
+                                    <Badge
+                                      size="sm"
+                                      variant="filled"
+                                      color={CATEGORY_COLORS[capsule.category || ""] || "gray"}
+                                      leftSection={CATEGORY_ICONS[capsule.category || ""]}
+                                    >
+                                      {categoryLabel(capsule.category)}
+                                    </Badge>
+                                    <Badge size="sm" variant="light" color={getScoreColor(capScore)}>
+                                      {(capsule.score ?? 0) <= 1 ? (capsule.score ?? 0).toFixed(2) : capScore.toFixed(0)}
+                                    </Badge>
+                                  </Group>
+                                  <Text fw={700} size="sm" lh={1.45}>{capsule.title}</Text>
+                                  <Text size="xs" c="dimmed" lineClamp={4} mt={6} lh={1.65}>
+                                    {capsule.content || "（暂无内容）"}
+                                  </Text>
+                                  {(capsule.signals?.length ?? 0) > 0 && (
+                                    <Group gap={4} mt="sm">
+                                      {capsule.signals!.slice(0, 3).map((tag) => (
+                                        <Badge key={tag} size="xs" variant="outline" color="gray">{tag}</Badge>
+                                      ))}
+                                    </Group>
+                                  )}
+                                  <Group justify="space-between" mt="sm">
+                                    <Text size="xs" c="dimmed">{agentName} · 本局提炼</Text>
+                                    <IconEye size={14} style={{ opacity: 0.45 }} />
+                                  </Group>
+                                </Box>
+                              ) : (
+                                <Box px="md" pb="md">
+                                  <Text size="xs" c="dimmed">胶囊生成中或失败，请重新运行复盘。</Text>
+                                </Box>
+                              )}
+                            </Card>
+                          </Box>
+                        );
+                      })}
+                    </Box>
                   )}
                 </Stack>
               </Paper>
@@ -412,7 +586,7 @@ export function ReviewPage() {
         {!loading && bundle && (
           <Group justify="center">
             <Button variant="light" radius="xl" onClick={() => void loadReview(true)} loading={running}>
-              重新运行 DM 复盘与胶囊生成
+              重新运行复盘与胶囊生成
             </Button>
           </Group>
         )}
@@ -441,17 +615,44 @@ export function ReviewPage() {
         )}
       </Modal>
 
-      <Modal opened={!!selectedCapsule} onClose={() => setSelectedCapsule(null)} radius="xl" size="md" title={selectedCapsule?.title}>
+      <Modal
+        opened={!!selectedCapsule}
+        onClose={() => setSelectedCapsule(null)}
+        title={null}
+        radius="xl"
+        size="md"
+        overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
+      >
         {selectedCapsule && (
-          <Stack gap="sm">
-            <Text size="sm" lh={1.8}>{selectedCapsule.content}</Text>
-            {selectedCapsule.strategy && (
-              <>
-                <Text fw={700} size="sm">策略</Text>
-                <Text size="sm" c="dimmed" style={{ whiteSpace: "pre-wrap" }}>{selectedCapsule.strategy}</Text>
-              </>
-            )}
-          </Stack>
+          <Paper radius="xl" className="industrial-card" p="lg">
+            <Stack gap="md">
+              <Group justify="space-between">
+                <Badge
+                  variant="filled"
+                  color={CATEGORY_COLORS[selectedCapsule.category || ""] || "gray"}
+                  leftSection={CATEGORY_ICONS[selectedCapsule.category || ""]}
+                >
+                  {categoryLabel(selectedCapsule.category)}
+                </Badge>
+                <Badge variant="light" color={getScoreColor(capsuleScorePercent(selectedCapsule.score))}>
+                  评分 {(selectedCapsule.score ?? 0) <= 1
+                    ? (selectedCapsule.score ?? 0).toFixed(2)
+                    : capsuleScorePercent(selectedCapsule.score).toFixed(0)}
+                </Badge>
+              </Group>
+              <Title order={3}>{selectedCapsule.title}</Title>
+              {selectedCapsule.agent_name && (
+                <Text size="sm" c="dimmed">{selectedCapsule.agent_name} · 本局经验胶囊</Text>
+              )}
+              <Text size="sm" lh={1.8}>{selectedCapsule.content}</Text>
+              {selectedCapsule.strategy && (
+                <>
+                  <Text fw={700} size="sm">策略</Text>
+                  <Text size="sm" c="dimmed" style={{ whiteSpace: "pre-wrap" }}>{selectedCapsule.strategy}</Text>
+                </>
+              )}
+            </Stack>
+          </Paper>
         )}
       </Modal>
     </Box>

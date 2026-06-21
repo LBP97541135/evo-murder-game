@@ -455,6 +455,21 @@ def match_personas_for_script(
         db_session.close()
 
 
+def ensure_persona_loaded_for_agent(agent) -> bool:
+    """若 Agent 尚未加载人设库，按 Agent 名称自动匹配并写入 constitution。"""
+    if getattr(agent, "persona_key", None):
+        return False
+    persona = get_persona_by_name(agent.name)
+    if not persona:
+        return False
+    agent.constitution = build_constitution_from_persona(
+        persona, agent.constitution or ""
+    )
+    agent.identity_doc = build_identity_doc_from_persona(persona)
+    agent.persona_key = persona["key"]
+    return True
+
+
 def build_constitution_from_persona(persona: dict, base_constitution: str = "") -> str:
     """从人设生成完整的 constitution。
 

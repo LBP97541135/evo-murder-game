@@ -32,15 +32,25 @@ web/
 
 ## 启动与构建
 
-```powershell
+```bash
 cd web
 npm install
 npm start
 ```
-c
-开发服务器默认地址为 `http://localhost:3000`，前端 API 地址为
-`http://localhost:10001`。`start` 脚本使用 Windows `set` 语法；
-在 PowerShell 执行策略限制 `npm.ps1` 时，可以使用 `npm.cmd start`。
+
+开发服务器默认地址为 `http://localhost:3000`，前端 API 通过 `package.json`
+的 `proxy` 代理到 `http://localhost:8000`。`npm start` 无需额外环境变量，
+跨平台（Windows/macOS/Linux）直接运行。
+
+如需自定义后端地址：
+
+```bash
+# macOS / Linux
+REACT_APP_API_URL=http://localhost:8000 npm start
+
+# Windows PowerShell
+$env:REACT_APP_API_URL="http://localhost:8000"; npm start
+```
 
 生产构建：
 

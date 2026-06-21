@@ -13,9 +13,8 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from api.schemas.invoke_types import InvocationRequest
-from api.llm.llm_service import ROLE_SYSTEM_PROMPTS
 from api.agents.game_engine import game_engine
-from api.agents.game_context import build_game_context_prompt, find_agent_key
+from api.agents.game_context import build_invoke_system_prompt, find_agent_key
 
 logger = logging.getLogger(__name__)
 
@@ -33,26 +32,16 @@ async def invoke_ai_stream(req: InvocationRequest):
         data: {"type": "done", "final": "..."}\n\n
     """
     role = req.actor.role_type or "companion"
-    system_prompt = ROLE_SYSTEM_PROMPTS.get(role, ROLE_SYSTEM_PROMPTS["companion"])
-
-    # 将角色信息融入 system prompt
-    system_prompt += f"\n\n当前角色：{req.actor.name}\n角色简介：{req.actor.bio}\n性格：{req.actor.personality}"
-
-    if req.actor.secret:
-        system_prompt += f"\n角色秘密（仅你自己知道）：{req.actor.secret}"
-
-    if req.actor.violation:
-        system_prompt += f"\n行为限制（绝不能违反）：{req.actor.violation}"
-
-    # 注入游戏环境上下文（如果提供了 session_id）
-    if req.session_id:
-        game_context = build_game_context_prompt(
-            req.session_id,
-            req.actor.name,
-            req.speech_phase or None,
-        )
-        if game_context:
-            system_prompt += f"\n\n---\n{game_context}"
+    system_prompt = build_invoke_system_prompt(
+        session_id=req.session_id,
+        actor_name=req.actor.name,
+        role_type=role,
+        bio=req.actor.bio or "",
+        personality=req.actor.personality or "",
+        secret=req.actor.secret or "",
+        violation=req.actor.violation or "",
+        speech_phase=req.speech_phase or None,
+    )
 
     # 构建用户消息
     user_message = ""

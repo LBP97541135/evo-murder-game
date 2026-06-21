@@ -472,6 +472,24 @@ async def present_evidence(req: EvidencePresentationRequest):
 
         session.commit()
 
+        if evidence.session_id:
+            try:
+                from api.agents.game_engine import game_engine
+                game_engine.record_evidence_presentation(
+                    game_id=evidence.session_id,
+                    evidence={
+                        "id": evidence.id,
+                        "name": evidence.name,
+                        "description": evidence.basic_description or "",
+                    },
+                    presented_by=req.presentedBy,
+                    presented_to=req.presentedTo,
+                    reason=req.textContent or "",
+                    ai_response=ai_response,
+                )
+            except Exception as mem_err:
+                logger.warning(f"证物记忆写入失败（非致命）: {mem_err}")
+
         return {
             "success": True,
             "aiResponse": ai_response,

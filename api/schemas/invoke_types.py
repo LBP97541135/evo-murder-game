@@ -74,6 +74,7 @@ class InvocationRequest(BaseModel):
     all_actors: List[SafeActor] = []
     chat_messages: List[LLMMessage] = []
     temperature: float = 0.7
+    speech_phase: str = ""  # intro / discussion — 公共发言阶段专用指引
 
 
 class InvocationResponse(BaseModel):

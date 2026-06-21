@@ -23,6 +23,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
+PUBLIC_PRESENT_TARGETS = {"公开", "所有人", "all", "public"}
+
 from api.db.models import get_session, GameSession, ConversationTurn, GameProgressRecord, AgentGameStateModel
 
 logger = logging.getLogger(__name__)
@@ -236,6 +238,9 @@ class GameEngine:
                     "ended_at": gs.ended_at.isoformat() if gs.ended_at else None,
                     "hints_used": gs.result.get("hints_used", 0) if gs.result else 0,
                     "chat_count": gs.result.get("chat_count", 0) if gs.result else 0,
+                    "public_evidences": gs.result.get("public_evidences", []) if gs.result else [],
+                    "role_evidences": gs.result.get("role_evidences", {}) if gs.result else {},
+                    "player_character_name": gs.result.get("player_character_name", "") if gs.result else "",
                     "agents": {},
                 }
                 # 恢复每个 Agent 的状态（表可能不存在于旧数据库，捕捉异常）
@@ -292,12 +297,16 @@ class GameEngine:
             "chat_count": 0,
             "agents": {},
             "player_character_name": player_character_name,
+            "public_evidences": [],
         }
 
         self._games[game_id] = game_state
 
         # 初始化所有 Agent 游戏状态
         self._init_agent_game_states(game_id, script_id, player_character_name)
+
+        # 注入全部历史胶囊到 Agent constitution
+        self._load_capsules_for_agents()
 
         # 同步到数据库
         self._sync_to_db(game_state)
@@ -504,10 +513,93 @@ class GameEngine:
 
         game_state["agents"].update(new_agents)
         game_state["cast"] = cast
+        role_evidences = self._assign_role_evidences(game_state, script_id)
+        game_state["role_evidences"] = role_evidences
         self._sync_to_db(game_state)
 
         logger.info(f"Applied cast for game {game_id}: {len(new_agents)} agents")
-        return {"agents": len(new_agents), "cast": cast}
+        return {"agents": len(new_agents), "cast": cast, "role_evidences": role_evidences}
+
+    def _assign_role_evidences(self, game_state: dict, script_id: str) -> dict[str, list[dict]]:
+        """为每个角色分配 4 件证物：2 件角色关联 + 2 件随机。"""
+        import json
+        import random
+        from api.db.models import get_session, ScriptEvidence
+
+        db_session = get_session()
+        try:
+            rows = db_session.query(ScriptEvidence).filter(
+                ScriptEvidence.script_id == script_id
+            ).all()
+        finally:
+            db_session.close()
+
+        if not rows:
+            return {}
+
+        all_items: list[tuple[dict, list[str]]] = []
+        by_role: dict[str, list[dict]] = {}
+        for row in rows:
+            related = (
+                json.loads(row.related_characters)
+                if isinstance(row.related_characters, str)
+                else (row.related_characters or [])
+            )
+            item = {
+                "id": row.id,
+                "name": row.name,
+                "description": row.description or "",
+                "category": row.category or "physical",
+            }
+            all_items.append((item, related))
+            for role_name in related:
+                by_role.setdefault(role_name, []).append(item)
+
+        assigned_ids: set[str] = set()
+        result: dict[str, list[dict]] = {}
+
+        def pick_for_role(role_name: str) -> list[dict]:
+            role_pool = list(by_role.get(role_name, []))
+            random.shuffle(role_pool)
+
+            fixed: list[dict] = []
+            for item in role_pool:
+                if len(fixed) >= 2:
+                    break
+                if item["id"] not in assigned_ids:
+                    fixed.append(item)
+                    assigned_ids.add(item["id"])
+
+            if len(fixed) < 2:
+                fallback = [it for it, _ in all_items if it["id"] not in assigned_ids]
+                random.shuffle(fallback)
+                for item in fallback:
+                    if len(fixed) >= 2:
+                        break
+                    fixed.append(item)
+                    assigned_ids.add(item["id"])
+
+            random_pool = [it for it, _ in all_items if it["id"] not in assigned_ids]
+            random.shuffle(random_pool)
+            extras = random_pool[: max(0, 4 - len(fixed))]
+            for item in extras:
+                assigned_ids.add(item["id"])
+
+            return (fixed + extras)[:4]
+
+        for _key, state in game_state.get("agents", {}).items():
+            role_name = (state.character or {}).get("name", "")
+            if not role_name or state.character.get("isVictim"):
+                continue
+            picks = pick_for_role(role_name)
+            state.discovered_evidences = picks
+            result[role_name] = picks
+
+        player_role = game_state.get("player_character_name", "")
+        if player_role and player_role not in result:
+            result[player_role] = pick_for_role(player_role)
+
+        return result
 
     def _build_safe_actors_for_cast(
         self,
@@ -612,8 +704,11 @@ class GameEngine:
                     "vote_result": game_session.result.get("vote_result") if game_session.result else None,
                     "started_at": game_session.started_at.isoformat() if game_session.started_at else "",
                     "ended_at": game_session.ended_at.isoformat() if game_session.ended_at else None,
-                    "hints_used": 0,
-                    "chat_count": 0,
+                    "hints_used": game_session.result.get("hints_used", 0) if game_session.result else 0,
+                    "chat_count": game_session.result.get("chat_count", 0) if game_session.result else 0,
+                    "public_evidences": game_session.result.get("public_evidences", []) if game_session.result else [],
+                    "role_evidences": game_session.result.get("role_evidences", {}) if game_session.result else {},
+                    "player_character_name": game_session.result.get("player_character_name", "") if game_session.result else "",
                     "agents": {},
                 }
                 self._games[game_id] = game_state
@@ -805,6 +900,90 @@ class GameEngine:
                 })
 
         self._sync_to_db(game)
+
+    def record_evidence_presentation(
+        self,
+        game_id: str,
+        evidence: dict,
+        presented_by: str,
+        presented_to: str,
+        reason: str = "",
+        ai_response: str = "",
+    ) -> dict:
+        """证物出示后写入 Agent 记忆，公开证物同步到 game.public_evidences。"""
+        game = self.get_game(game_id)
+        if not game:
+            return {"error": "game_not_found"}
+
+        from api.agents.game_context import find_agent_key
+
+        ev_id = evidence.get("id", "")
+        ev_name = evidence.get("name", "")
+        ev_desc = evidence.get("description") or evidence.get("basic_description", "")
+        presented_to_norm = (presented_to or "").strip()
+        is_public = (
+            presented_to_norm in PUBLIC_PRESENT_TARGETS
+            or presented_to_norm.lower() in PUBLIC_PRESENT_TARGETS
+        )
+
+        if is_public:
+            memory_line = f"[公共证物] {presented_by} 公开出示「{ev_name}」"
+        else:
+            memory_line = f"[证物出示] {presented_by} 向{presented_to_norm}出示「{ev_name}」"
+        if reason:
+            memory_line += f"；理由：{reason}"
+        if ai_response:
+            memory_line += f"。反应：{ai_response}"
+
+        if is_public:
+            public_list = game.setdefault("public_evidences", [])
+            if not any(e.get("id") == ev_id for e in public_list):
+                public_list.append({
+                    "id": ev_id,
+                    "name": ev_name,
+                    "description": ev_desc,
+                    "presented_by": presented_by,
+                    "reason": reason,
+                    "ai_response": ai_response,
+                    "presented_at": datetime.now(timezone.utc).isoformat(),
+                })
+
+            for _key, state in game.get("agents", {}).items():
+                state.chat_history.append({"role": "public", "content": memory_line})
+                if ev_id and not any(e.get("id") == ev_id for e in state.discovered_evidences):
+                    state.discovered_evidences.append({
+                        "id": ev_id,
+                        "name": ev_name,
+                        "description": ev_desc,
+                        "source": "公开出示",
+                        "visibility": "public",
+                    })
+        else:
+            target_key = find_agent_key(game, presented_to_norm)
+            if target_key:
+                target_state = game.get("agents", {}).get(target_key)
+                if target_state:
+                    target_state.chat_history.append({"role": "private", "content": memory_line})
+                    if ev_id and not any(e.get("id") == ev_id for e in target_state.discovered_evidences):
+                        target_state.discovered_evidences.append({
+                            "id": ev_id,
+                            "name": ev_name,
+                            "description": ev_desc,
+                            "source": f"{presented_by}私聊出示",
+                            "visibility": "private",
+                        })
+
+            presenter_key = find_agent_key(game, presented_by)
+            if presenter_key:
+                presenter_state = game.get("agents", {}).get(presenter_key)
+                if presenter_state:
+                    presenter_state.chat_history.append({
+                        "role": presenter_key,
+                        "content": memory_line,
+                    })
+
+        self._sync_to_db(game)
+        return {"success": True, "public": is_public}
 
     def record_hint(self, game_id: str) -> None:
         """记录一次提示使用。"""
@@ -1352,44 +1531,28 @@ class GameEngine:
     def force_answer(
         self, game_id: str, asker_key: str, target_key: str, question: str
     ) -> dict:
-        """强制指定 Agent 回答问题——插入发言队列最前面，其他角色不可插队。
-
-        Args:
-            asker_key: 提问者（通常是 "player"）
-            target_key: 被指定的 Agent key
-            question: 问题内容
-        Returns:
-            {"success": bool, "target_key": str, "question": str}
-        """
+        """记录公共喊话——被喊话者须立刻回复，但不改变发言队列顺序。"""
         game = self.get_game(game_id)
         if not game:
             return {"error": "game_not_found"}
 
-        # 确认目标 Agent 存在
         target_state = game.get("agents", {}).get(target_key)
         if not target_state:
             return {"error": "target_agent_not_found"}
 
-        # 写入目标 Agent 的 chat_history
+        asker_label = asker_key if asker_key != "player" else "玩家"
         target_state.chat_history.append({
-            "role": asker_key,
-            "content": f"[强制回答] {question}",
+            "role": asker_label,
+            "content": f"[喊话] {question}",
         })
 
-        # 如果有发言轮次，将目标插入队列最前面
-        speak_round = game.get("speak_round")
-        if speak_round:
-            speak_round.interject(target_key, reason=f"被{asker_key}强制指定回答")
-
-        # 记录强制回答状态
-        if "force_answer_state" not in game:
-            game["force_answer_state"] = None
-        game["force_answer_state"] = {
-            "asker": asker_key,
-            "target": target_key,
-            "question": question,
-            "active": True,
-        }
+        for key, state in game.get("agents", {}).items():
+            if key == target_key:
+                continue
+            state.chat_history.append({
+                "role": "public",
+                "content": f"[喊话] {asker_label} 向{target_state.character.get('name', target_key)}喊话：{question}",
+            })
 
         self._sync_to_db(game)
 
@@ -1453,6 +1616,11 @@ class GameEngine:
                 "vote_result": game_state.get("vote_result"),
                 "hints_used": game_state.get("hints_used", 0),
                 "chat_count": game_state.get("chat_count", 0),
+                "public_evidences": game_state.get("public_evidences", []),
+                "role_evidences": game_state.get("role_evidences", {}),
+                "player_character_name": game_state.get("player_character_name", ""),
+                "cast": game_state.get("cast", []),
+                "frontend_phase_index": game_state.get("frontend_phase_index"),
             }
 
             if game_state.get("ended_at"):
@@ -1515,16 +1683,18 @@ class GameEngine:
                 db_session.close()
 
     def _trigger_capsule_generation(self, game_id: str, script_id: str) -> None:
-        """进入复盘阶段时自动触发胶囊生成流程。"""
+        """进入复盘阶段时触发完整自进化流水线。"""
         try:
-            from api.capsules.capsule_service import review_and_generate_capsules
-            result = review_and_generate_capsules(
-                session_id=game_id,
-                script_id=script_id,
+            from api.capsules.dm_evolution_service import run_full_evolution_pipeline
+            result = run_full_evolution_pipeline(game_id)
+            summary = result.get("evolution_summary", {})
+            logger.info(
+                f"复盘自进化完成: game={game_id}, "
+                f"genes={summary.get('genes_created', 0)}, "
+                f"capsules={summary.get('capsules_created', 0)}"
             )
-            logger.info(f"复盘胶囊生成完成: game={game_id}, genes={len(result.get('genes', []))}, capsules={len(result.get('capsules', []))}")
         except Exception as e:
-            logger.error(f"复盘胶囊生成失败: {e}")
+            logger.error(f"复盘自进化失败: {e}")
 
     def _auto_post_game_reveal(self, game_id: str) -> dict:
         """从 VOTING 进入 REVEAL 时自动触发后剧情生成。
@@ -1565,20 +1735,19 @@ class GameEngine:
             return {"error": str(e)}
 
     def _load_capsules_for_agents(self) -> None:
-        """新局开始前，为所有 Agent 搜索并消费历史胶囊，融入 constitution。"""
+        """新局开始前，为所有 Agent 注入全部历史胶囊。"""
         try:
-            from api.capsules.capsule_service import get_capsules_for_agent
+            from api.capsules.dm_evolution_service import load_all_capsules_prompt, _resolve_agent_db_id
             from api.orchestrator import orchestrator
 
             for key, agent in orchestrator.agents.items():
-                capsule_prompt = get_capsules_for_agent(
-                    agent_role=agent.role.value,
-                    signals=agent.domains,
-                    limit=3,
-                )
-                if capsule_prompt:
-                    agent.constitution += capsule_prompt
-                    logger.info(f"Agent {agent.name} 已加载历史胶囊经验")
+                if not agent.registered or not agent.node_id:
+                    continue
+                db_id = _resolve_agent_db_id(agent.node_id) or agent.node_id
+                prompt = load_all_capsules_prompt(db_id, agent.role.value)
+                if prompt and prompt not in (agent.constitution or ""):
+                    agent.constitution = (agent.constitution or "") + prompt
+                    logger.info(f"Agent {agent.name} 已注入全部历史胶囊")
         except Exception as e:
             logger.error(f"加载胶囊经验失败: {e}")
 

@@ -46,7 +46,11 @@ async def invoke_ai_stream(req: InvocationRequest):
 
     # 注入游戏环境上下文（如果提供了 session_id）
     if req.session_id:
-        game_context = build_game_context_prompt(req.session_id, req.actor.name)
+        game_context = build_game_context_prompt(
+            req.session_id,
+            req.actor.name,
+            req.speech_phase or None,
+        )
         if game_context:
             system_prompt += f"\n\n---\n{game_context}"
 

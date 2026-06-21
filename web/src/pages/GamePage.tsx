@@ -52,7 +52,6 @@ import {
   createGameSession,
   forceGamePhase,
   getGamePhase,
-  getEvidences,
   presentEvidence,
   saveConversation,
   sendPrivateChatMessage,
@@ -68,6 +67,7 @@ import {
   getEvidencePool,
   getGameSnapshot,
   getScript,
+  getAgentState,
   listAgents,
   initPersonas,
   listPersonas,
@@ -89,6 +89,14 @@ import {
 } from "../utils/gameCasting";
 import { AgentCastingPanel } from "../components/AgentCastingPanel";
 import { buildReviewPath } from "../utils/gameNavigation";
+import { getRoleEvidences, getPublicEvidences, parseAgentEvidencePresent, parseAgentCallout, forceAgentAnswer } from "../api/assistantApi";
+import { roleEvidenceItemsToGameEvidence } from "../utils/roleEvidence";
+import {
+  mergePublicEvidenceRecords,
+  publicEvidenceRecordsToGameEvidence,
+  type PublicEvidenceRecord,
+} from "../utils/publicEvidence";
+import { resolveCalloutTarget } from "../utils/callout";
 
 // ============================
 // 角色立绘
@@ -222,7 +230,7 @@ type PublicEvent =
   | { id: number; type: "speech"; speaker: string; text: string; tone: string; suspectId?: string; evidenceId?: string }
   | { id: number; type: "system"; title: string; text: string }
   | { id: number; type: "evidence"; speaker: string; evidence: Evidence; reason?: string; suspectId?: string; aiResponse?: string; targetName?: string }
-  | { id: number; type: "forced"; asker: string; agent: string; question: string }
+  | { id: number; type: "callout"; asker: string; target: string; question: string; answer: string }
   | { id: number; type: "private"; agent: string; text: string }
   | { id: number; type: "accusation"; actor: string; target: string; sourceTitle: string; reason?: string }
   | { id: number; type: "inquiry"; asker: string; target: string; sourceTitle: string; question: string; answer: string };
@@ -231,14 +239,14 @@ type PublicEventInput =
   | { type: "speech"; speaker: string; text: string; tone: string; suspectId?: string; evidenceId?: string }
   | { type: "system"; title: string; text: string }
   | { type: "evidence"; speaker: string; evidence: Evidence; reason?: string; suspectId?: string; aiResponse?: string; targetName?: string }
-  | { type: "forced"; asker: string; agent: string; question: string }
+  | { type: "callout"; asker: string; target: string; question: string; answer: string }
   | { type: "private"; agent: string; text: string }
   | { type: "accusation"; actor: string; target: string; sourceTitle: string; reason?: string }
   | { type: "inquiry"; asker: string; target: string; sourceTitle: string; question: string; answer: string };
 
 type DialogType =
   | "private"
-  | "force"
+  | "callout"
   | "evidence"
   | "evidence-detail"
   | "discussion-detail"
@@ -265,7 +273,7 @@ type StreamingState = {
   agentKey: string;
   agentName: string;
   partial: string;
-  phase: "intro" | "speech" | "forced" | "inquiry";
+  phase: "intro" | "speech" | "callout" | "inquiry";
   resolveId?: number; // event id to append text to
 };
 
@@ -437,11 +445,16 @@ function GamePage() {
   const [introduced, setIntroduced] = React.useState<string[]>([]);
   const [searchesLeft, setSearchesLeft] = React.useState(2);
   const [evidence, setEvidence] = React.useState<Evidence[]>([]);
+  const [publicEvidence, setPublicEvidence] = React.useState<PublicEvidenceRecord[]>([]);
   const [newEvidence, setNewEvidence] = React.useState<Evidence | null>(null);
   const [queue, setQueue] = React.useState<string[]>([]);
   const [currentSpeaker, setCurrentSpeaker] = React.useState<string | null>(null);
   const [discussionRoundIdle, setDiscussionRoundIdle] = React.useState(false);
-  const [forcedAnswer, setForcedAnswer] = React.useState<{ asker: string; agentId: string; question: string } | null>(null);
+  const [pendingPlayerCallout, setPendingPlayerCallout] = React.useState<{
+    askerLabel: string;
+    question: string;
+    floorHolderId: string;
+  } | null>(null);
   const [events, setEvents] = React.useState<PublicEvent[]>(defaultInitialEvents);
   const [rightTab, setRightTab] = React.useState<string | null>("script");
   const [dialog, setDialog] = React.useState<DialogType>(null);
@@ -471,6 +484,8 @@ function GamePage() {
   const [introSpotlight, setIntroSpotlight] = React.useState<(typeof dynamicPlayers)[number] | null>(null);
   const snapshotRestoredRef = React.useRef<string | null>(null);
   const agentSpeechStartedRef = React.useRef<string | null>(null);
+  const calloutInProgressRef = React.useRef(false);
+  const calloutCompleteRef = React.useRef<(() => void) | null>(null);
   const AGENT_SPEECH_HANDOFF_MS = 700;
 
   const clearGameProgress = () => {
@@ -543,13 +558,22 @@ function GamePage() {
             });
         }
 
-        // 恢复证物列表
-        if (snapshot.evidences && snapshot.evidences.length > 0) {
+        // 恢复证物：玩家持有 + 已公开
+        const playerRole = snapshot.player_character_name || playerById("user")?.role || "";
+        const roleItems = snapshot.role_evidences?.[playerRole] || [];
+        if (roleItems.length > 0) {
+          const restoredPlayerEvidence = roleEvidenceItemsToGameEvidence(roleItems);
+          setEvidence(restoredPlayerEvidence);
+          setSelectedEvidenceId(restoredPlayerEvidence[0]?.id || "");
+        } else if (snapshot.evidences && snapshot.evidences.length > 0) {
           const restoredEvidence = snapshot.evidences.map(backendEvidenceToGameEvidence);
           setEvidence(restoredEvidence);
           if (restoredEvidence.length > 0) {
             setSelectedEvidenceId(restoredEvidence[0].id);
           }
+        }
+        if (snapshot.public_evidences?.length) {
+          setPublicEvidence(snapshot.public_evidences as PublicEvidenceRecord[]);
         }
 
         // 恢复角色确认状态
@@ -606,30 +630,17 @@ function GamePage() {
 
   React.useEffect(() => {
     if (!sessionId) return;
-    // 加载已发现的运行时证物
-    getEvidences(id, sessionId)
+    getPublicEvidences(sessionId)
       .then((result) => {
-        const records = result.evidences.map(backendEvidenceToGameEvidence);
-        setEvidence(records);
-        setSelectedEvidenceId((current) => current || records[0]?.id || "");
+        if (result.public_evidences?.length) {
+          setPublicEvidence(result.public_evidences as PublicEvidenceRecord[]);
+        }
       })
-      .catch((error) => {
-        showFeedback(`后端证物加载失败：${error instanceof Error ? error.message : String(error)}`);
-      });
+      .catch(() => undefined);
     // 加载剧本证物池（初始证物 + 搜证池）
     const dbScriptId = id;
     getEvidencePool(dbScriptId)
       .then((result) => {
-        const initialEv: Evidence[] = (result.initial_evidences || []).map((item: Record<string, any>) => ({
-          id: item.id,
-          name: item.name,
-          description: item.description,
-          location: item.category || "未知",
-          time: "游戏开始",
-          source: "初始证物",
-          visibility: "仅自己" as const,
-          icon: item.category || "card",
-        }));
         const searchEv = (result.search_evidences || []).map((item: Record<string, any>) => ({
           id: item.id,
           name: item.name,
@@ -641,15 +652,7 @@ function GamePage() {
           icon: item.category || "physical",
         }));
         setSearchEvidencePool(searchEv);
-        if (initialEv.length > 0 && sessionId) {
-          Promise.all(initialEv.map((item) => registerEvidenceInBackend(item).catch(() => undefined)))
-            .catch(() => undefined);
-        }
-        // 初始证物加入玩家证物列表
-        if (initialEv.length > 0) {
-          setEvidence((prev) => [...initialEv, ...prev]);
-          setSelectedEvidenceId((current) => current || initialEv[0]?.id || "");
-        }
+        // 角色证物在选角完成后由 syncPlayerRoleEvidences 分配（每角色 4 件）
       })
       .catch((error) => {
         showFeedback(`证物池加载失败：${error instanceof Error ? error.message : String(error)}`);
@@ -671,6 +674,9 @@ function GamePage() {
   const firstAgentPlayerId = agents[0]?.id || "";
   const current = playerById(currentSpeaker);
   const isUserSpeaking = currentSpeaker === "user";
+  const mustReplyCallout = Boolean(pendingPlayerCallout);
+  const canUsePublicInput = isUserSpeaking || mustReplyCallout;
+  const calloutBusy = mustReplyCallout || streaming?.phase === "callout";
   const userQueued = queue.includes("user");
   const nextSpeakerId = queue[0] ?? null;
   const nextSpeaker = playerById(nextSpeakerId);
@@ -714,6 +720,23 @@ function GamePage() {
 
   const showFeedback = (text: string) => setFeedback(text);
 
+  const appendPublicEvidence = (
+    item: Evidence,
+    presentedBy: string,
+    reason?: string,
+    aiResponse?: string,
+  ) => {
+    setPublicEvidence((items) => mergePublicEvidenceRecords(items, {
+      id: item.id,
+      name: item.name,
+      description: item.description,
+      presented_by: presentedBy,
+      reason,
+      ai_response: aiResponse,
+      presented_at: new Date().toISOString(),
+    }));
+  };
+
   const getPublicSpeakerLabel = () => {
     const self = playerById("user");
     if (!self || self.role === "侦探") return "林晓青";
@@ -732,6 +755,82 @@ function GamePage() {
       discoveredBy: "player",
     });
   };
+
+  const syncPlayerRoleEvidences = async (
+    activeSessionId: string,
+    roleEvidences?: Record<string, Array<{ id: string; name: string; description: string; category?: string }>>,
+    playerRoleName?: string,
+  ) => {
+    let items: Array<{ id: string; name: string; description: string; category?: string }> = [];
+    if (roleEvidences) {
+      const roleKey = playerRoleName
+        || playerById("user")?.role
+        || castingRoles.find((role) => role.id === selectedRole)?.role
+        || "";
+      items = roleEvidences[roleKey] || [];
+    }
+    if (items.length === 0) {
+      try {
+        const result = await getRoleEvidences(activeSessionId);
+        items = result.player_evidences || [];
+      } catch {
+        return;
+      }
+    }
+    if (items.length === 0) return;
+    const roleEvidence = roleEvidenceItemsToGameEvidence(items);
+    await Promise.all(roleEvidence.map((item) => registerEvidenceInBackend(item).catch(() => undefined)));
+    setEvidence(roleEvidence);
+    setSelectedEvidenceId(roleEvidence[0]?.id || "");
+    showFeedback(`已为你分配 ${roleEvidence.length} 件初始证物（2 件关联 + 2 件随机）。`);
+  };
+
+  const handleAgentEvidencePresent = async (
+    agentPlayer: (typeof dynamicPlayers)[number],
+    evidenceName: string,
+    reason: string,
+    _speechEventId: number,
+  ) => {
+    if (!sessionId) return;
+    try {
+      const state = await getAgentState(sessionId, resolveAgentKey(agentPlayer.id));
+      const pool = (state?.discovered_evidences || []) as Array<{ id: string; name: string; description: string }>;
+      const matched = pool.find((item) => item.name === evidenceName || item.name.includes(evidenceName));
+      if (!matched) {
+        showFeedback(`${agentPlayer.role} 试图出示「${evidenceName}」，但未持有该证物。`);
+        return;
+      }
+      const gameEv: Evidence = {
+        id: matched.id,
+        name: matched.name,
+        description: matched.description,
+        location: "线索交流",
+        time: "讨论阶段",
+        source: `${agentPlayer.role} 出示`,
+        visibility: "所有人",
+        icon: "card",
+      };
+      await registerEvidenceInBackend(gameEv);
+      const result = await presentEvidence(matched.id, "所有人", agentPlayer.role, reason, "所有人");
+      addEvent({
+        type: "evidence",
+        speaker: `${agentPlayer.role} · ${agentPlayer.name}`,
+        evidence: gameEv,
+        reason: reason || undefined,
+        aiResponse: result.aiResponse || undefined,
+        targetName: "所有人",
+      });
+      appendPublicEvidence(gameEv, agentPlayer.role, reason, result.aiResponse);
+      showFeedback(`${agentPlayer.role} 公开出示了「${matched.name}」。`);
+    } catch (error) {
+      showFeedback(`Agent 出示证物失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  React.useEffect(() => {
+    if (!sessionId || !roleConfirmed || evidence.length > 0) return;
+    void syncPlayerRoleEvidences(sessionId);
+  }, [sessionId, roleConfirmed, evidence.length]);
 
   // ============================
   // AI 流式调用辅助
@@ -855,7 +954,14 @@ function GamePage() {
       const castPayload = buildCastPayload(castingRoles, castAssignments);
       let confirmMessage = `角色已确认，后端游戏会话 ${activeSessionId} 可用。`;
       try {
-        await applyGameCast(activeSessionId, castPayload, playerCharName);
+        const castResult = await applyGameCast(activeSessionId, castPayload, playerCharName) as {
+          role_evidences?: Record<string, Array<{ id: string; name: string; description: string; category?: string }>>;
+        };
+        if (castResult.role_evidences) {
+          await syncPlayerRoleEvidences(activeSessionId, castResult.role_evidences, playerCharName);
+        } else {
+          await syncPlayerRoleEvidences(activeSessionId, undefined, playerCharName);
+        }
       } catch (castError) {
         console.warn("选角同步失败:", castError);
         confirmMessage = `角色已确认，但选角同步失败：${castError instanceof Error ? castError.message : String(castError)}`;
@@ -962,7 +1068,7 @@ function GamePage() {
 
   const joinQueue = () => {
     if (phase.id === "vote") return showFeedback("投票阶段已经停止新的发言申请。");
-    if (forcedAnswer) return showFeedback("当前为强制回答，其他角色暂时不可插队。");
+    if (calloutBusy) return showFeedback("当前有喊话回复进行中，请稍候。");
     if (userQueued || isUserSpeaking) return;
     setDiscussionRoundIdle(false);
     if (!currentSpeaker && !streaming?.active) {
@@ -1001,6 +1107,172 @@ function GamePage() {
     setSpeakerSeconds(90);
   };
 
+  const runInlineCalloutResponse = (
+    targetId: string,
+    calloutQuestion: string,
+    askerLabel: string,
+    floorHolderId: string,
+    onComplete: () => void,
+  ) => {
+    const target = playerById(targetId);
+    const trimmedQuestion = calloutQuestion.trim();
+    if (!target || !trimmedQuestion) {
+      onComplete();
+      return;
+    }
+
+    calloutInProgressRef.current = true;
+    calloutCompleteRef.current = onComplete;
+
+    const targetLabel = target.id === "user"
+      ? "林晓青 · 玩家"
+      : `${target.role} · ${target.name}`;
+
+    if (target.id === "user") {
+      const eventId = Date.now();
+      setEvents((items) => [
+        ...items,
+        {
+          id: eventId,
+          type: "callout",
+          asker: askerLabel,
+          target: targetLabel,
+          question: trimmedQuestion,
+          answer: "（等待回复…）",
+        } as PublicEvent,
+      ]);
+      setPendingPlayerCallout({ askerLabel, question: trimmedQuestion, floorHolderId });
+      showFeedback(`${askerLabel} 向你喊话，请立即回复。`);
+      return;
+    }
+
+    if (!target.agent || !sessionId) {
+      calloutInProgressRef.current = false;
+      calloutCompleteRef.current = null;
+      onComplete();
+      return;
+    }
+
+    forceAgentAnswer(sessionId, resolveAgentKey(targetId), trimmedQuestion, askerLabel).catch(() => undefined);
+
+    const eventId = Date.now();
+    setEvents((items) => [
+      ...items,
+      {
+        id: eventId,
+        type: "callout",
+        asker: askerLabel,
+        target: targetLabel,
+        question: trimmedQuestion,
+        answer: "（正在思考…）",
+      } as PublicEvent,
+    ]);
+    setStreaming({
+      active: true,
+      agentKey: targetId,
+      agentName: target.name,
+      partial: "",
+      phase: "callout",
+      resolveId: eventId,
+    });
+
+    streamAgentSpeech(
+      targetId,
+      `${askerLabel} 向你喊话："${trimmedQuestion}"\n`
+        + "请立即以角色身份简短回答（60-100字）。不要泄露角色 secret，可回避或转移话题。",
+      (token) => {
+        setStreaming((prev) => {
+          if (!prev) return null;
+          return { ...prev, partial: prev.partial + token };
+        });
+        setEvents((items) =>
+          items.map((item) =>
+            item.id === eventId && item.type === "callout"
+              ? {
+                  ...item,
+                  answer: item.answer === "（正在思考…）" ? token : item.answer + token,
+                }
+              : item,
+          ),
+        );
+      },
+      (final) => {
+        setStreaming(null);
+        setEvents((items) =>
+          items.map((item) =>
+            item.id === eventId && item.type === "callout"
+              ? { ...item, answer: final }
+              : item,
+          ),
+        );
+        calloutInProgressRef.current = false;
+        const resume = calloutCompleteRef.current;
+        calloutCompleteRef.current = null;
+        resume?.();
+      },
+      () => {
+        setStreaming(null);
+        setEvents((items) =>
+          items.map((item) =>
+            item.id === eventId && item.type === "callout"
+              ? { ...item, answer: "（未能回答）" }
+              : item,
+          ),
+        );
+        calloutInProgressRef.current = false;
+        const resume = calloutCompleteRef.current;
+        calloutCompleteRef.current = null;
+        resume?.();
+      },
+    );
+  };
+
+  const finishCalloutChainAfterSpeech = (
+    rawFinal: string,
+    speakerId: string,
+    askerLabel: string,
+    onAllComplete: () => void,
+  ) => {
+    const evidenceParsed = parseAgentEvidencePresent(rawFinal);
+    const calloutParsed = parseAgentCallout(evidenceParsed.speechText);
+    const agentPlayer = playerById(speakerId);
+
+    const afterCallout = () => {
+      calloutInProgressRef.current = false;
+      onAllComplete();
+    };
+
+    const startCallout = () => {
+      if (!calloutParsed.targetName || !calloutParsed.question.trim()) {
+        afterCallout();
+        return;
+      }
+      const target = resolveCalloutTarget(calloutParsed.targetName, dynamicPlayers);
+      if (!target) {
+        afterCallout();
+        return;
+      }
+      runInlineCalloutResponse(
+        target.id,
+        calloutParsed.question,
+        askerLabel,
+        speakerId,
+        afterCallout,
+      );
+    };
+
+    if (evidenceParsed.evidenceName && agentPlayer) {
+      void handleAgentEvidencePresent(
+        agentPlayer,
+        evidenceParsed.evidenceName,
+        evidenceParsed.reason,
+        0,
+      ).finally(startCallout);
+      return;
+    }
+    startCallout();
+  };
+
   const startAgentDiscussionSpeech = (
     speakerId: string,
     onComplete?: () => void,
@@ -1011,6 +1283,8 @@ function GamePage() {
       onComplete?.();
       return;
     }
+
+    agentSpeechStartedRef.current = speakerId;
 
     const eventId = Date.now();
     const recentDiscussion = events
@@ -1047,7 +1321,12 @@ function GamePage() {
     streamAgentSpeech(
       speakerId,
       promptOverride
-        || `最近讨论内容：\n${recentDiscussion || "（讨论刚开始）"}\n\n请根据当前讨论，以你的角色身份和已有信息发表看法。你可以：(1)回应其他人的话题 (2)提出新线索方向 (3)对其他角色的发言表示质疑。不要泄露你的角色秘密。`,
+        || `最近讨论内容：\n${recentDiscussion || "（讨论刚开始）"}\n\n`
+          + "请按「线索交流」阶段规则发言：回应他人、提出疑问或补充方向；"
+          + "若需公开出示你持有的证物，在发言末尾单独一行写 "
+          + "[出示证物:证物名称|理由]；"
+          + "若需当场追问某角色或玩家（林晓青），在发言末尾单独一行写 "
+          + "[喊话:角色名或林晓青|问题]。不要泄露角色秘密。",
       (token) => {
         setStreaming((prev) => {
           if (!prev) return null;
@@ -1058,12 +1337,20 @@ function GamePage() {
       },
       (final) => {
         setStreaming(null);
-        updateEventText(eventId, final);
-        onComplete?.();
+        const evidenceParsed = parseAgentEvidencePresent(final);
+        const calloutParsed = parseAgentCallout(evidenceParsed.speechText);
+        updateEventText(eventId, calloutParsed.speechText || evidenceParsed.speechText || final);
+        const askerLabel = `${agentPlayer.role} · ${agentPlayer.name}`;
+        finishCalloutChainAfterSpeech(final, speakerId, askerLabel, () => {
+          agentSpeechStartedRef.current = null;
+          onComplete?.();
+        });
       },
       () => {
         setStreaming(null);
         updateEventText(eventId, "（AI 发言失败，已跳过）");
+        agentSpeechStartedRef.current = null;
+        calloutInProgressRef.current = false;
         onComplete?.();
       },
     );
@@ -1079,6 +1366,7 @@ function GamePage() {
     if (currentSpeaker !== "user") {
       const agentPlayer = playerById(currentSpeaker);
       if (agentPlayer?.agent) {
+        agentSpeechStartedRef.current = null;
         advanceSpeakerQueue(currentSpeaker);
         return;
       }
@@ -1090,33 +1378,23 @@ function GamePage() {
   React.useEffect(() => {
     if (phase.id !== "discussion") return;
     if (!currentSpeaker || streaming?.active) return;
+    if (calloutInProgressRef.current) return;
 
     const speakerPlayer = playerById(currentSpeaker);
     if (!speakerPlayer?.agent) return;
     if (agentSpeechStartedRef.current === currentSpeaker) return;
 
     const speakerId = currentSpeaker;
-    const pendingForced = forcedAnswer?.agentId === speakerId ? forcedAnswer : null;
-    if (forcedAnswer && !pendingForced) return;
-
-    agentSpeechStartedRef.current = speakerId;
-    const forcedQuestion = pendingForced?.question;
-    if (pendingForced) {
-      setForcedAnswer(null);
-    }
 
     const timer = window.setTimeout(() => {
       startAgentDiscussionSpeech(
         speakerId,
         () => advanceSpeakerQueue(speakerId),
-        pendingForced
-          ? `你被指定回答以下问题："${forcedQuestion}"\n请根据你的角色身份和已知信息回答。注意：不能泄露角色秘密，但可以根据已有线索进行推理。`
-          : undefined,
       );
     }, AGENT_SPEECH_HANDOFF_MS);
 
     return () => window.clearTimeout(timer);
-  }, [phase.id, currentSpeaker, streaming?.active, forcedAnswer]);
+  }, [phase.id, currentSpeaker, streaming?.active]);
 
   const completeIntro = () => {
     if (!currentIntroId) return;
@@ -1154,7 +1432,8 @@ function GamePage() {
       });
       streamAgentSpeech(
         introPlayer.id,
-        `请以角色身份做自我介绍。你的角色是"${introPlayer.role}"，${introPlayer.publicIdentity}。背景：${introPlayer.background}。`,
+        `请完成你的公共自我介绍。角色：${introPlayer.role}；公开身份：${introPlayer.publicIdentity}。`
+          + "按阶段规则只介绍自己，不要推理、指控、出示证物或泄露秘密。",
         (token) => {
           setStreaming((prev) => {
             if (!prev) return null;
@@ -1219,17 +1498,24 @@ function GamePage() {
     }
   };
 
-  const confirmForcedAnswer = () => {
-    if (!isUserSpeaking) return showFeedback("只有在自己发言时才能指定 Agent 回答。");
-    const agent = playerById(targetId);
-    if (!question.trim() || !agent) return showFeedback("请选择 Agent 并填写问题。");
-    setForcedAnswer({ asker: "林晓青", agentId: targetId, question });
-    setDiscussionRoundIdle(false);
-    setQueue((items) => [targetId, ...items.filter((item) => item !== targetId && item !== currentSpeaker)]);
-    addEvent({ type: "forced", asker: "林晓青", agent: agent.name, question });
+  const confirmCallout = () => {
+    if (!isUserSpeaking) return showFeedback("只有在自己发言时才能喊话。");
+    if (calloutBusy) return showFeedback("请等待当前喊话回复完成。");
+    const target = playerById(targetId);
+    if (!question.trim() || !target) return showFeedback("请选择对象并填写问题。");
+    const trimmedQuestion = question.trim();
+    const askerLabel = getPublicSpeakerLabel();
     setDialog(null);
     setQuestion("");
-    showFeedback(`${agent.name} 已被指定为下一位发言者，其他角色不可插队。`);
+    runInlineCalloutResponse(
+      target.id,
+      trimmedQuestion,
+      askerLabel,
+      currentSpeaker || "user",
+      () => {
+        showFeedback(`${target.name} 已回答，你可以继续发言。`);
+      },
+    );
   };
 
   const showEvidence = async () => {
@@ -1266,6 +1552,9 @@ function GamePage() {
         aiResponse: result.aiResponse || undefined,
         targetName,
       });
+      if (evidenceVisibility === "所有人") {
+        appendPublicEvidence(item, speakerLabel, reason, result.aiResponse);
+      }
       setDialog(null);
       setEvidenceReason("");
       showFeedback(
@@ -1303,6 +1592,42 @@ function GamePage() {
 
   const sendPublicMessage = async () => {
     if (!publicMessage.trim()) return;
+
+    if (pendingPlayerCallout) {
+      const content = publicMessage.trim();
+      const { askerLabel, question } = pendingPlayerCallout;
+      try {
+        if (sessionId) {
+          await saveConversation({
+            sessionId,
+            actorName: getPublicSpeakerLabel(),
+            chatMessages: [{ role: "user", content: `${askerLabel} 喊话："${question}"\n我的回复：${content}` }],
+            finalResponse: content,
+          });
+        }
+        addEvent({ type: "speech", speaker: getPublicSpeakerLabel(), text: content, tone: "orange" });
+        setEvents((items) =>
+          items.map((item) =>
+            item.type === "callout"
+              && item.question === question
+              && item.answer === "（等待回复…）"
+              ? { ...item, answer: content }
+              : item,
+          ),
+        );
+        setPublicMessage("");
+        setPendingPlayerCallout(null);
+        calloutInProgressRef.current = false;
+        const resume = calloutCompleteRef.current;
+        calloutCompleteRef.current = null;
+        resume?.();
+        showFeedback("已回复喊话。");
+      } catch (error) {
+        showFeedback(`回复失败：${error instanceof Error ? error.message : String(error)}`);
+      }
+      return;
+    }
+
     if (!isUserSpeaking) return showFeedback("当前没有公共发言权，请先进入发言队列。");
     if (!sessionId) return showFeedback("发送失败：尚未创建后端游戏会话。");
     const content = publicMessage.trim();
@@ -1811,12 +2136,13 @@ function GamePage() {
         </Paper>
       );
     }
-    if (event.type === "forced") {
+    if (event.type === "callout") {
       return (
         <Paper key={event.id} radius="xl" p="md" className="game-forced-event">
-          <Text fw={900}>指定回答：{event.asker} → {event.agent}</Text>
-          <Text size="sm" mt={5}>“{event.question}”</Text>
-          <Text size="xs" c="red.3" mt={6}>被指定 Agent 必须成为下一位发言者，其他角色不可插队。</Text>
+          <Text fw={900}>喊话：{event.asker} → {event.target}</Text>
+          <Text size="sm" mt={5}>问：“{event.question}”</Text>
+          <Text size="sm" mt="sm" fw={600}>答：{event.answer}</Text>
+          <Text size="xs" c="dimmed" mt={6}>喊话不改变发言顺序，被喊话者须立刻回复。</Text>
         </Paper>
       );
     }
@@ -2104,10 +2430,10 @@ function GamePage() {
     }
     return (
       <Stack gap="md">
-        <Paper radius="xl" p="md" className={forcedAnswer ? "game-speaker-control is-forced" : "game-speaker-control"}>
+        <Paper radius="xl" p="md" className={pendingPlayerCallout ? "game-speaker-control is-forced" : "game-speaker-control"}>
           <Group justify="space-between" align="flex-start">
-            <Box><Text size="xs" c="dimmed">{forcedAnswer ? "强制回答中" : current ? "当前发言人" : discussionRoundIdle ? "等待下一轮" : "当前暂无角色发言"}</Text><Title order={3}>{current ? `${current.name} · ${current.role}` : discussionRoundIdle ? "本轮顺序已结束" : `下一位：${nextSpeaker?.name || "等待申请"}`}</Title>{forcedAnswer && <Text size="sm" mt={5}>问题：{forcedAnswer.question}</Text>}</Box>
-            <Stack gap={4} align="flex-end"><Badge color={forcedAnswer ? "red" : "orange"} leftSection={<IconClock size={13} />}>{formatTime(speakerSeconds)}</Badge><Text size="xs" c="dimmed">{queue.length > 0 ? `待发：${[nextSpeaker?.name, ...queue.slice(1).map((item) => playerById(item)?.name)].filter(Boolean).join(" → ")}` : discussionRoundIdle ? "可申请发言或开启下一轮" : "队列已空"}</Text></Stack>
+            <Box><Text size="xs" c="dimmed">{pendingPlayerCallout ? "须回复喊话" : current ? "当前发言人" : discussionRoundIdle ? "等待下一轮" : "当前暂无角色发言"}</Text><Title order={3}>{current ? `${current.name} · ${current.role}` : discussionRoundIdle ? "本轮顺序已结束" : `下一位：${nextSpeaker?.name || "等待申请"}`}</Title>{pendingPlayerCallout && <Text size="sm" mt={5}>{pendingPlayerCallout.askerLabel} 问你：{pendingPlayerCallout.question}</Text>}</Box>
+            <Stack gap={4} align="flex-end"><Badge color={pendingPlayerCallout ? "red" : "orange"} leftSection={<IconClock size={13} />}>{formatTime(speakerSeconds)}</Badge><Text size="xs" c="dimmed">{queue.length > 0 ? `待发：${[nextSpeaker?.name, ...queue.slice(1).map((item) => playerById(item)?.name)].filter(Boolean).join(" → ")}` : discussionRoundIdle ? "可申请发言或开启下一轮" : "队列已空"}</Text></Stack>
           </Group>
           <Group mt="md">{currentSpeaker && <Button size="xs" variant="light" disabled={Boolean(streaming?.active)} onClick={finishSpeaker}>{current?.agent ? streaming?.active ? "AI 发言中…" : "跳过 Agent" : "结束发言"}</Button>}{current?.agent && !streaming?.active && <Button size="xs" variant="subtle" disabled>暂停 Agent</Button>}</Group>
         </Paper>
@@ -2178,41 +2504,82 @@ function GamePage() {
               <Text fw={900}>我的证物</Text>
               <Badge variant="light">{evidence.length}</Badge>
             </Group>
-            <Stack gap="sm">
-              {evidence.map((item) => (
-                <Paper key={item.id} p="sm" radius="lg" className="game-clue-item">
-                  <Group justify="space-between">
-                    <Button variant="transparent" p={0} onClick={() => openEvidenceDetail(item)}>
-                      {item.name}
-                    </Button>
-                    <Badge size="xs">{item.visibility}</Badge>
-                  </Group>
-                  <Text size="sm" c="dimmed" mt={5}>{item.description}</Text>
-                  <Text size="xs" mt="sm">获得方式：{item.source}</Text>
-                  <Group gap={6} mt="sm">
-                    <Button size="compact-xs" variant="light" onClick={() => openEvidenceDetail(item)}>查看详情</Button>
-                    <Button
-                      size="compact-xs"
-                      variant="light"
-                      onClick={() => {
-                        if (phase.id !== "discussion") {
-                          showFeedback("只有在线索交流阶段才能出示证物。");
-                          return;
-                        }
-                        if (!isUserSpeaking) {
-                          showFeedback("请先申请发言，轮到你时即可出示证物。");
-                          return;
-                        }
-                        setSelectedEvidenceId(item.id);
-                        setDialog("evidence");
-                      }}
-                    >
-                      出示证物
-                    </Button>
-                  </Group>
-                </Paper>
-              ))}
-            </Stack>
+            {evidence.length === 0 ? (
+              <Text size="sm" c="dimmed">暂无证物，选角完成后会自动分配，或在搜证阶段发现新线索。</Text>
+            ) : (
+              <Stack gap="sm">
+                {evidence.map((item) => (
+                  <Paper key={item.id} p="sm" radius="lg" className="game-clue-item">
+                    <Group justify="space-between">
+                      <Button variant="transparent" p={0} onClick={() => openEvidenceDetail(item)}>
+                        {item.name}
+                      </Button>
+                      <Badge size="xs">{item.visibility}</Badge>
+                    </Group>
+                    <Text size="sm" c="dimmed" mt={5}>{item.description}</Text>
+                    <Text size="xs" mt="sm">获得方式：{item.source}</Text>
+                    <Group gap={6} mt="sm">
+                      <Button size="compact-xs" variant="light" onClick={() => openEvidenceDetail(item)}>查看详情</Button>
+                      <Button
+                        size="compact-xs"
+                        variant="light"
+                        onClick={() => {
+                          if (phase.id !== "discussion") {
+                            showFeedback("只有在线索交流阶段才能出示证物。");
+                            return;
+                          }
+                          if (!isUserSpeaking) {
+                            showFeedback("请先申请发言，轮到你时即可出示证物。");
+                            return;
+                          }
+                          setSelectedEvidenceId(item.id);
+                          setDialog("evidence");
+                        }}
+                      >
+                        出示证物
+                      </Button>
+                    </Group>
+                  </Paper>
+                ))}
+              </Stack>
+            )}
+
+            <Divider />
+            <Group justify="space-between">
+              <Box>
+                <Text fw={900}>公开证物</Text>
+                <Text size="xs" c="dimmed">讨论中已向全场公开出示的证物</Text>
+              </Box>
+              <Badge color="teal" variant="light">{publicEvidence.length}</Badge>
+            </Group>
+            {publicEvidence.length === 0 ? (
+              <Text size="sm" c="dimmed">暂无人公开出示证物。</Text>
+            ) : (
+              <Stack gap="sm">
+                {publicEvidenceRecordsToGameEvidence(publicEvidence).map((item, index) => {
+                  const record = publicEvidence[index];
+                  return (
+                    <Paper key={item.id} p="sm" radius="lg" className="game-clue-item">
+                      <Group justify="space-between">
+                        <Button variant="transparent" p={0} onClick={() => openEvidenceDetail(item)}>
+                          {item.name}
+                        </Button>
+                        <Badge size="xs" color="teal">公开</Badge>
+                      </Group>
+                      <Text size="sm" c="dimmed" mt={5}>{item.description}</Text>
+                      <Text size="xs" mt="sm">出示人：{record.presented_by}</Text>
+                      {record.reason ? <Text size="xs" mt={4}>出示理由：{record.reason}</Text> : null}
+                      {record.ai_response ? (
+                        <Text size="xs" c="dimmed" mt={4}>现场反应：{record.ai_response}</Text>
+                      ) : null}
+                      <Group gap={6} mt="sm">
+                        <Button size="compact-xs" variant="light" onClick={() => openEvidenceDetail(item)}>查看详情</Button>
+                      </Group>
+                    </Paper>
+                  );
+                })}
+              </Stack>
+            )}
 
             <Divider />
             <Group justify="space-between">
@@ -2322,8 +2689,10 @@ function GamePage() {
     if (streaming?.active) {
       return (
         <Group gap="xs" wrap="nowrap" style={{ width: "100%" }}>
-          <Badge size="lg" color="blue" variant="dot">{streaming.agentName} AI 正在发言…</Badge>
-          <Text size="sm" c="dimmed">等待 AI 生成回复后自动结束发言</Text>
+          <Badge size="lg" color="blue" variant="dot">
+            {streaming.phase === "callout" ? `${streaming.agentName} 正在回复喊话…` : `${streaming.agentName} AI 正在发言…`}
+          </Badge>
+          <Text size="sm" c="dimmed">等待 AI 生成回复</Text>
         </Group>
       );
     }
@@ -2334,13 +2703,13 @@ function GamePage() {
             开启下一轮讨论
           </Button>
         )}
-        {!isUserSpeaking && !userQueued && <Button radius="xl" onClick={joinQueue} disabled={Boolean(forcedAnswer)}>选择发言</Button>}
+        {!isUserSpeaking && !userQueued && <Button radius="xl" onClick={joinQueue} disabled={calloutBusy}>选择发言</Button>}
         {userQueued && !isUserSpeaking && <Button radius="xl" variant="light" onClick={cancelQueue}>取消申请 · 排队第 {(currentSpeaker ? 1 : 0) + queue.indexOf("user") + 1} 位</Button>}
         {isUserSpeaking && <Button radius="xl" color="orange" onClick={finishSpeaker}>结束发言</Button>}
         <Button radius="xl" variant="light" onClick={() => setDialog("private")}>发起私聊</Button>
-        <Button radius="xl" variant="light" disabled={!isUserSpeaking} onClick={() => setDialog("force")}>指定 Agent 回答</Button>
+        <Button radius="xl" variant="light" disabled={!isUserSpeaking || calloutBusy} onClick={() => setDialog("callout")}>喊话</Button>
         <Button radius="xl" variant="light" disabled={!isUserSpeaking} onClick={() => setDialog("evidence")}>出示证物</Button>
-        <Button radius="xl" variant="subtle" color="orange" disabled={Boolean(forcedAnswer)} onClick={() => goToPhase(5)}>进入推理投票</Button>
+        <Button radius="xl" variant="subtle" color="orange" disabled={calloutBusy} onClick={() => goToPhase(5)}>进入推理投票</Button>
         <TextInput
           value={publicMessage}
           onChange={(event) => setPublicMessage(event.currentTarget.value)}
@@ -2350,12 +2719,18 @@ function GamePage() {
               void sendPublicMessage();
             }
           }}
-          placeholder={isUserSpeaking ? "输入当前公共发言，Enter 发送…" : "轮到你发言后可输入内容"}
-          disabled={!isUserSpeaking}
+          placeholder={
+            pendingPlayerCallout
+              ? `须回复 ${pendingPlayerCallout.askerLabel} 的喊话，Enter 发送…`
+              : isUserSpeaking
+                ? "输入当前公共发言，Enter 发送…"
+                : "轮到你发言后可输入内容"
+          }
+          disabled={!canUsePublicInput}
           className="game-message-input"
           radius="xl"
         />
-        <ActionIcon size="lg" radius="xl" onClick={sendPublicMessage} disabled={!isUserSpeaking}><IconSend size={17} /></ActionIcon>
+        <ActionIcon size="lg" radius="xl" onClick={sendPublicMessage} disabled={!canUsePublicInput}><IconSend size={17} /></ActionIcon>
       </Group>
     );
   };
@@ -2442,7 +2817,7 @@ function GamePage() {
                   })}
                 </Stack>
               </ScrollArea>
-              {selectedPlayer && selectedPlayer.id !== "dm" && <Paper p="sm" radius="lg" className="game-player-actions"><Group justify="space-between"><Text fw={800}>{selectedPlayer.role} · 快捷操作</Text><Badge color={selectedPlayer.agent ? "blue" : "orange"} variant="light">{selectedPlayer.agent ? "AI 玩家" : "真人玩家"}</Badge></Group><Group gap={5} mt="sm"><Button size="xs" variant="light" onClick={() => showFeedback(`${selectedPlayer.role} 的公开身份：${selectedPlayer.publicIdentity}`)}>公开信息</Button>{selectedPlayer.id !== "user" && <Button size="xs" variant="light" onClick={() => { setTargetId(selectedPlayer.id); setDialog("private"); }}>发起私聊</Button>}{selectedPlayer.agent && <Button size="xs" variant="light" disabled={!isUserSpeaking} onClick={() => { setTargetId(selectedPlayer.id); setDialog("force"); }}>指定回答</Button>}</Group></Paper>}
+              {selectedPlayer && selectedPlayer.id !== "dm" && <Paper p="sm" radius="lg" className="game-player-actions"><Group justify="space-between"><Text fw={800}>{selectedPlayer.role} · 快捷操作</Text><Badge color={selectedPlayer.agent ? "blue" : "orange"} variant="light">{selectedPlayer.agent ? "AI 玩家" : "真人玩家"}</Badge></Group><Group gap={5} mt="sm"><Button size="xs" variant="light" onClick={() => showFeedback(`${selectedPlayer.role} 的公开身份：${selectedPlayer.publicIdentity}`)}>公开信息</Button>{selectedPlayer.id !== "user" && <Button size="xs" variant="light" onClick={() => { setTargetId(selectedPlayer.id); setDialog("private"); }}>发起私聊</Button>}{selectedPlayer.agent && <Button size="xs" variant="light" disabled={!isUserSpeaking || calloutBusy} onClick={() => { setTargetId(selectedPlayer.id); setDialog("callout"); }}>喊话</Button>}</Group></Paper>}
             </aside>
 
             <section className="game-core-panel"><ScrollArea className="game-core-scroll" offsetScrollbars>{renderStage()}</ScrollArea></section>
@@ -2453,7 +2828,7 @@ function GamePage() {
         </Paper>
       </Box>
 
-      <Modal opened={dialog === "force"} onClose={() => setDialog(null)} title="指定 Agent 回答" centered><Stack><Select label="选择 Agent" value={targetId} onChange={(value) => setTargetId(value || firstAgentPlayerId)} data={agents.map((agent) => ({ value: agent.id, label: `${agent.name} · ${agent.role}` }))} /><Textarea label="需要回答的问题" value={question} onChange={(event) => setQuestion(event.currentTarget.value)} minRows={4} /><Button onClick={confirmForcedAnswer}>确认指定</Button></Stack></Modal>
+      <Modal opened={dialog === "callout"} onClose={() => setDialog(null)} title="喊话" centered><Stack><Select label="喊话对象" value={targetId} onChange={(value) => setTargetId(value || firstAgentPlayerId)} data={dynamicPlayers.filter((player) => player.id !== "dm" && player.id !== "user").map((player) => ({ value: player.id, label: player.agent ? `${player.name} · ${player.role}` : `${player.role} · ${player.name}` }))} /><Textarea label="喊话内容" placeholder="向该角色提问，对方须立刻回复，不改变你的发言顺序" value={question} onChange={(event) => setQuestion(event.currentTarget.value)} minRows={4} /><Button onClick={confirmCallout}>发送喊话</Button></Stack></Modal>
       <Modal opened={dialog === "evidence"} onClose={() => setDialog(null)} title="出示证物" centered><Stack>{evidence.length === 0 ? <Text c="dimmed">暂无证物，请先完成搜证或等待初始证物加载。</Text> : <><Select label="选择证物" value={selectedEvidenceId || evidence[0]?.id || ""} onChange={(value) => setSelectedEvidenceId(value || evidence[0]?.id || "")} data={evidence.map((item) => ({ value: item.id, label: item.name }))} /><Textarea label="出示理由" placeholder="说明这项证据支持或反驳了什么观点" value={evidenceReason} onChange={(event) => setEvidenceReason(event.currentTarget.value)} minRows={3} /><Radio.Group label="公开范围" value={evidenceVisibility} onChange={setEvidenceVisibility}><Stack mt="xs"><Radio value="所有人" label="公开给所有人" /><Radio value="指定角色" label="只分享给指定角色" /></Stack></Radio.Group>{evidenceVisibility === "指定角色" && <Select label="指定角色" value={targetId} onChange={(value) => setTargetId(value || firstAgentPlayerId)} data={dynamicPlayers.filter((player) => player.id !== "user" && player.id !== "dm" && player.role !== "顾沉" && player.role !== "侦探").map((player) => ({ value: player.id, label: `${player.role} · ${player.name}` }))} />}<Button onClick={showEvidence} disabled={!selectedEvidenceId && !evidence[0]?.id}>确认出示</Button></>}</Stack></Modal>
       <Modal
         opened={dialog === "evidence-detail"}
@@ -2651,7 +3026,7 @@ function GamePage() {
         </Stack>
       </Modal>
       <Modal opened={dialog === "private"} onClose={() => setDialog(null)} title="发起或接受私聊" centered><Stack><Select label="私聊对象" value={targetId} onChange={(value) => setTargetId(value || dynamicPlayers.find((p) => p.id !== "user" && p.id !== "dm")?.id || "")} data={dynamicPlayers.filter((player) => player.id !== "user" && player.id !== "dm").map((player) => ({ value: player.id, label: `${player.role} · 玩家：${player.name}` }))} /><Text size="sm" c="dimmed">私聊建立后即可直接对话，不需要额外设置 Agent 发言权限；私聊内容和证物不会自动公开。</Text><Button onClick={() => acceptPrivateInvite()}>建立私聊</Button></Stack></Modal>
-      <Modal opened={dialog === "rules"} onClose={() => setDialog(null)} title="游戏规则" centered size="lg"><Stack><Text>公共讨论采用单一发言权，普通发言按申请顺序进行。</Text><Text>被指定回答的 Agent 必须成为下一位发言者，回答结束后恢复原队列。</Text><Text>私聊与公共讨论独立运行，私聊内容和证物仅参与者可见。</Text><Text>进入投票阶段后停止新的发言、私聊和证物出示。</Text></Stack></Modal>
+      <Modal opened={dialog === "rules"} onClose={() => setDialog(null)} title="游戏规则" centered size="lg"><Stack><Text>公共讨论采用单一发言权，普通发言按申请顺序进行。</Text><Text>喊话不改变发言顺序：玩家或 Agent 喊话后，被喊话者须立刻回复，之后仍由原发言人继续。</Text><Text>Agent 发言末尾可使用 [喊话:角色名或林晓青|问题] 当场追问。</Text><Text>私聊与公共讨论独立运行，私聊内容和证物仅参与者可见。</Text><Text>进入投票阶段后停止新的发言、私聊和证物出示。</Text></Stack></Modal>
       <Modal
         opened={dialog === "script"}
         onClose={() => {

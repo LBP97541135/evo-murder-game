@@ -127,6 +127,8 @@ async def create_game_session(req: GameSessionRequest):
 
     # 初始化游戏引擎（同时初始化 Agent 游戏状态 + 胶囊注入）
     game_engine.create_game(script_id=req.script_id, session_id=session_id, player_character_name=req.player_character_name)
+    from api.capsules.dm_evolution_service import inject_all_capsules_for_agents
+    inject_all_capsules_for_agents()
     logger.info(f"Successfully created game session: {session_id}, player_character={req.player_character_name}")
 
     return GameSessionResponse(
@@ -154,6 +156,39 @@ async def apply_game_cast(session_id: str, req: ApplyCastRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"success": True, **result}
+
+
+@router.get("/role-evidences/{session_id}")
+async def get_role_evidences(session_id: str):
+    """获取各角色初始分配的证物（2 关联 + 2 随机）。"""
+    game = game_engine.get_game(session_id)
+    if not game:
+        raise HTTPException(status_code=404, detail="game_not_found")
+    role_evidences = game.get("role_evidences") or {}
+    if not role_evidences:
+        for _key, state in game.get("agents", {}).items():
+            role_name = (state.character or {}).get("name", "")
+            if role_name and state.discovered_evidences:
+                role_evidences[role_name] = state.discovered_evidences
+    player_role = game.get("player_character_name", "")
+    return {
+        "success": True,
+        "role_evidences": role_evidences,
+        "player_role": player_role,
+        "player_evidences": role_evidences.get(player_role, []),
+    }
+
+
+@router.get("/public-evidences/{session_id}")
+async def get_public_evidences(session_id: str):
+    """获取本局已公开出示的证物列表。"""
+    game = game_engine.get_game(session_id)
+    if not game:
+        raise HTTPException(status_code=404, detail="game_not_found")
+    return {
+        "success": True,
+        "public_evidences": game.get("public_evidences") or [],
+    }
 
 
 # ============================
@@ -256,6 +291,29 @@ async def record_chat(session_id: str):
 async def post_game_reflection(session_id: str, game_result: dict):
     """游戏结束后，所有 Agent 执行自评并记录经验。"""
     return orchestrator.post_game_reflection(session_id, game_result)
+
+
+@router.get("/review/{session_id}")
+async def get_game_review(session_id: str):
+    """获取 DM 复盘包（真相揭示、角色评分、基因与胶囊）。"""
+    from api.capsules.dm_evolution_service import get_review_bundle
+
+    bundle = get_review_bundle(session_id)
+    if not bundle.get("success") and bundle.get("message") == "review_not_generated":
+        return bundle
+    return bundle
+
+
+@router.post("/review/{session_id}/run")
+async def run_game_review(session_id: str):
+    """运行完整 DM 复盘 + 并行评分 + 基因/胶囊自进化流水线。"""
+    from api.capsules.dm_evolution_service import run_full_evolution_pipeline
+
+    try:
+        result = run_full_evolution_pipeline(session_id)
+        return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ============================
@@ -635,6 +693,9 @@ async def get_game_snapshot(session_id: str):
         "started_at": game.get("started_at", ""),
         "cast": game.get("cast", []),
         "player_character_name": game.get("player_character_name", ""),
+        "role_evidences": game.get("role_evidences", {}),
+        "public_evidences": game.get("public_evidences", []),
+        "dm_review": game.get("dm_review"),
     }
 
 
@@ -885,11 +946,7 @@ async def get_private_thread(session_id: str, thread_id: str):
 
 @router.post("/force-answer/{session_id}")
 async def force_answer(session_id: str, req: ForceAnswerRequest):
-    """强制指定 Agent 回答问题。
-
-    被指定的 Agent 插入发言队列最前面，其他角色不可插队。
-    回答完毕后调用 /force-answer/{id}/clear 清除状态。
-    """
+    """公共喊话——被喊话者须立刻回复，但不改变发言队列顺序。"""
     result = game_engine.force_answer(
         game_id=session_id,
         asker_key=req.asker_key,

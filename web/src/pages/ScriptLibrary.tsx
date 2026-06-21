@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import {
   ActionIcon,
   Badge,
@@ -29,6 +29,7 @@ import {
 import { useNavigate } from "react-router-dom";
 
 import { useScripts } from "../api/hooks";
+import { useBgm } from "../hooks/useBgm";
 import { StudioShell } from "./StudioShell";
 
 const genreOptions = ["全部", "情感本", "推理本", "机制本", "阵营本"];
@@ -43,6 +44,7 @@ const feedOptions = [
 
 function ScriptLibrary() {
   const navigate = useNavigate();
+  const bgm = useBgm();
   const { scripts, loading, error } = useScripts();
   const hotScripts = scripts.filter((script) => script.hot);
   const [activeSlide, setActiveSlide] = React.useState(0);
@@ -50,6 +52,11 @@ function ScriptLibrary() {
   const [genre, setGenre] = React.useState("全部");
   const [difficulty, setDifficulty] = React.useState("全部");
   const [feed, setFeed] = React.useState("featured");
+
+  // 进入剧本库时自动播放背景音乐
+  useEffect(() => {
+    bgm.play();
+  }, []);
 
   React.useEffect(() => {
     const timer = window.setInterval(

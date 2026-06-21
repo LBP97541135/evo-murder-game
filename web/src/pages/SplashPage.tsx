@@ -50,9 +50,11 @@ export function SplashPage() {
         ref={videoRef}
         src={videoSrc}
         poster={posterImg}
+        preload="none"
         playsInline
         onTimeUpdate={handleTimeUpdate}
         onEnded={() => { setPhase("ended"); bgm.play(); }}
+        onError={() => { setPhase("ended"); setCtaVisible(true); }}
         style={{
           position: "absolute",
           inset: 0,
@@ -83,12 +85,13 @@ export function SplashPage() {
         </div>
       )}
 
-      {/* 跳过动画：右下角白色文字，点击直接进入 */}
+      {/* 跳过动画：顶部居中白色文字，点击直接进入 */}
       <div
         style={{
           position: "absolute",
-          bottom: 24,
-          right: 24,
+          top: 24,
+          left: "50%",
+          transform: "translateX(-50%)",
           zIndex: 10,
         }}
       >

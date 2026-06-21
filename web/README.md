@@ -123,7 +123,6 @@ npm run build
 
 ## 已知限制
 
-- `npm start` 当前是 Windows 专用脚本；跨平台运行需要改用 `cross-env`
-  或通过 shell 设置 `REACT_APP_API_URL`。
-- 外部封面图片和 Google Fonts 需要网络访问。
-- `figma-make/` 未安装依赖时无法直接执行 `npm run dev` 或 `npm run build`。
+- `npm start` 已改为跨平台兼容（直接 `react-scripts start`），不再依赖 Windows 专用语法
+- 外部封面图片和 Google Fonts 需要网络访问
+- `figma-make/` 未安装依赖时无法直接执行 `npm run dev` 或 `npm run build`

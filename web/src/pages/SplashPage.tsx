@@ -1,6 +1,5 @@
 import React, { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useBgm } from "../hooks/useBgm";
 
 const titleImg = new URL("../video_picture/暗夜剧场字体.png", import.meta.url).href;
 const ctaImg = new URL("../video_picture/触碰以入局字体.png", import.meta.url).href;
@@ -11,16 +10,9 @@ type Phase = "idle" | "playing" | "ended";
 
 export function SplashPage() {
   const navigate = useNavigate();
-  const bgm = useBgm();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [ctaVisible, setCtaVisible] = useState(false);
-
-  const skipToLibrary = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    bgm.play();
-    navigate("/library");
-  };
 
   const startVideo = () => {
     if (phase !== "idle") return;
@@ -50,9 +42,11 @@ export function SplashPage() {
         ref={videoRef}
         src={videoSrc}
         poster={posterImg}
+        preload="none"
         playsInline
         onTimeUpdate={handleTimeUpdate}
-        onEnded={() => { setPhase("ended"); bgm.play(); }}
+        onEnded={() => setPhase("ended")}
+        onError={() => { setPhase("ended"); setCtaVisible(true); }}
         style={{
           position: "absolute",
           inset: 0,
@@ -83,17 +77,21 @@ export function SplashPage() {
         </div>
       )}
 
-      {/* 跳过动画：右下角白色文字，点击直接进入 */}
+      {/* 跳过动画：顶部居中白色文字，点击直接进入 */}
       <div
         style={{
           position: "absolute",
-          bottom: 24,
-          right: 24,
+          top: 24,
+          left: "50%",
+          transform: "translateX(-50%)",
           zIndex: 10,
         }}
       >
         <span
-          onClick={skipToLibrary}
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate("/library");
+          }}
           style={{
             color: "#fff",
             fontSize: 14,
@@ -129,7 +127,8 @@ export function SplashPage() {
               display: "block",
             }}
             onClick={(e) => {
-              skipToLibrary(e);
+              e.stopPropagation();
+              navigate("/library");
             }}
           />
         </div>

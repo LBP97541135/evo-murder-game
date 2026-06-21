@@ -29,14 +29,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-        "http://localhost:10001",
-        "http://127.0.0.1:10001",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -65,6 +58,7 @@ from api.routes.evidence import router as evidence_router
 from api.routes.spoiler_stories import router as spoiler_router
 from api.routes.conversations import router as conversations_router
 from api.routes.capsules import router as capsules_router
+from api.routes.users import router as users_router
 
 app.include_router(health_router)
 app.include_router(agents_router, prefix="/agents", tags=["agents"])
@@ -77,3 +71,4 @@ app.include_router(evidence_router, prefix="/evidence", tags=["evidence"])
 app.include_router(spoiler_router, prefix="/spoiler-stories", tags=["spoiler_stories"])
 app.include_router(conversations_router, prefix="/conversations", tags=["conversations"])
 app.include_router(capsules_router, prefix="/capsules", tags=["capsules"])
+app.include_router(users_router, prefix="/users", tags=["users"])

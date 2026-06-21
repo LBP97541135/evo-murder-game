@@ -23,6 +23,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
+PUBLIC_PRESENT_TARGETS = {"公开", "所有人", "all", "public"}
+
 from api.db.models import get_session, GameSession, ConversationTurn, GameProgressRecord, AgentGameStateModel
 
 logger = logging.getLogger(__name__)
@@ -116,6 +118,8 @@ PHASE_CONFIG = {
 # 阶段流转顺序
 PHASE_ORDER = [GamePhase.INTRO, GamePhase.INVESTIGATION, GamePhase.VOTING, GamePhase.REVEAL, GamePhase.REVIEW]
 
+PLAYER_VOTERS = {"player", "林晓青", "player_default", "human"}
+
 
 # ============================
 # Agent 游戏状态（运行时）
@@ -199,82 +203,6 @@ class AgentGameState:
         return state
 
 
-class SpeakRoundState:
-    """Minimal in-memory speaking round state for companion turn order."""
-
-    def __init__(self, speakers: list[str], current_index: int = 0):
-        self.speakers = [speaker for speaker in speakers if speaker]
-        self.current_index = current_index if 0 <= current_index < len(self.speakers) else 0
-        self.interject_stack: list[dict] = []
-        self.round_active = bool(self.speakers)
-        self.round_complete = not self.speakers
-
-    @property
-    def current_speaker(self) -> Optional[str]:
-        if not self.round_active or self.round_complete or not self.speakers:
-            return None
-        if self.current_index >= len(self.speakers):
-            return None
-        return self.speakers[self.current_index]
-
-    def queue(self) -> list[str]:
-        current = self.current_speaker
-        if not current:
-            return []
-        return [current]
-
-    def next(self) -> dict:
-        if not self.round_active:
-            return self.to_dict()
-
-        if self.interject_stack:
-            restored = self.interject_stack.pop()
-            self.current_index = restored.get("return_index", self.current_index)
-        else:
-            self.current_index += 1
-
-        if self.current_index >= len(self.speakers):
-            self.round_complete = True
-            self.round_active = False
-
-        return self.to_dict()
-
-    def interject(self, speaker: str, reason: str = "") -> dict:
-        if not speaker:
-            return self.to_dict()
-
-        current = self.current_speaker
-        if current == speaker:
-            return self.to_dict()
-
-        if current is not None:
-            self.interject_stack.append({
-                "speaker": current,
-                "return_index": self.current_index,
-                "reason": reason,
-            })
-
-        if speaker in self.speakers:
-            self.current_index = self.speakers.index(speaker)
-        else:
-            self.speakers.append(speaker)
-            self.current_index = len(self.speakers) - 1
-
-        self.round_active = True
-        self.round_complete = False
-        return self.to_dict()
-
-    def to_dict(self) -> dict:
-        return {
-            "round_active": self.round_active,
-            "round_complete": self.round_complete,
-            "current_speaker": self.current_speaker,
-            "queue": self.queue(),
-            "all_speakers": list(self.speakers),
-            "interject_stack": list(self.interject_stack),
-        }
-
-
 # ============================
 # 游戏引擎
 # ============================
@@ -302,8 +230,6 @@ class GameEngine:
                 game_state = {
                     "game_id": gs.session_id,
                     "script_id": gs.script_id or "",
-                    "player_role_id": gs.result.get("player_role_id", "") if gs.result else "",
-                    "player_character": gs.result.get("player_character", {}) if gs.result else {},
                     "current_phase": gs.current_phase or GamePhase.INTRO,
                     "phase_history": gs.phase_history or [],
                     "votes": gs.result.get("votes", []) if gs.result else [],
@@ -312,6 +238,12 @@ class GameEngine:
                     "ended_at": gs.ended_at.isoformat() if gs.ended_at else None,
                     "hints_used": gs.result.get("hints_used", 0) if gs.result else 0,
                     "chat_count": gs.result.get("chat_count", 0) if gs.result else 0,
+                    "public_evidences": gs.result.get("public_evidences", []) if gs.result else [],
+                    "role_evidences": gs.result.get("role_evidences", {}) if gs.result else {},
+                    "player_character_name": gs.result.get("player_character_name", "") if gs.result else "",
+                    "cast": gs.result.get("cast", []) if gs.result else [],
+                    "reveal_data": gs.result.get("reveal_data") if gs.result else None,
+                    "dm_review": gs.result.get("dm_review") if gs.result else None,
                     "agents": {},
                 }
                 # 恢复每个 Agent 的状态（表可能不存在于旧数据库，捕捉异常）
@@ -347,18 +279,17 @@ class GameEngine:
         finally:
             db_session.close()
 
-    def create_game(self, script_id: str, session_id: str = "", player_role_id: str = "") -> dict:
+    def create_game(self, script_id: str, session_id: str = "", player_character_name: str = "") -> dict:
         """创建新游戏实例。
 
         同步初始化所有 Agent 的游戏状态（角色分配+胶囊注入）。
+        player_character_name: 玩家选择扮演的角色名，为空则使用 is_player 标记的角色。
         """
         game_id = session_id or f"game_{uuid.uuid4().hex[:8]}"
 
         game_state = {
             "game_id": game_id,
             "script_id": script_id,
-            "player_role_id": player_role_id,
-            "player_character": {},
             "current_phase": GamePhase.INTRO,
             "phase_history": [{"phase": GamePhase.INTRO, "entered_at": datetime.now(timezone.utc).isoformat()}],
             "votes": [],
@@ -368,20 +299,28 @@ class GameEngine:
             "hints_used": 0,
             "chat_count": 0,
             "agents": {},
+            "player_character_name": player_character_name,
+            "public_evidences": [],
         }
 
         self._games[game_id] = game_state
 
         # 初始化所有 Agent 游戏状态
-        self._init_agent_game_states(game_id, script_id)
+        self._init_agent_game_states(game_id, script_id, player_character_name)
+
+        # 注入全部历史胶囊到 Agent constitution
+        self._load_capsules_for_agents()
 
         # 同步到数据库
         self._sync_to_db(game_state)
 
         return game_state
 
-    def _init_agent_game_states(self, game_id: str, script_id: str) -> None:
-        """从 orchestrator 获取所有 Agent，将角色和胶囊注入 AgentGameState。"""
+    def _init_agent_game_states(self, game_id: str, script_id: str, player_character_name: str = "") -> None:
+        """从 orchestrator 获取所有 Agent，将角色和胶囊注入 AgentGameState。
+
+        player_character_name: 玩家选择扮演的角色名，该角色不会被分配给 Agent。
+        """
         from api.orchestrator import orchestrator
         from api.db.models import get_session, Script, Character
 
@@ -389,49 +328,28 @@ class GameEngine:
         if not game_state:
             return
 
-        # 从数据库加载剧本角色
-        characters = []
+        # 从数据库加载剧本角色，过滤掉真人玩家选择的角色
+        companion_characters = []
         global_story = ""
         db_session = get_session()
         try:
             script = db_session.query(Script).filter(Script.id == script_id).first()
             if script:
                 global_story = script.global_story or ""
-                characters = list(script.characters)
+                if player_character_name:
+                    companion_characters = [
+                        ch for ch in script.characters
+                        if ch.name != player_character_name and not ch.is_victim
+                    ]
+                else:
+                    companion_characters = [
+                        ch for ch in script.characters
+                        if not ch.is_player and not ch.is_victim
+                    ]
         finally:
             db_session.close()
 
         # 为每个 Agent 创建游戏状态
-        player_role_id = game_state.get("player_role_id", "")
-        player_character = None
-        remaining_characters = list(characters)
-        if player_role_id:
-            for index, character in enumerate(characters):
-                if character.id == player_role_id:
-                    player_character = character
-                    remaining_characters.pop(index)
-                    break
-
-        if player_character:
-            game_state["player_character"] = {
-                "id": player_character.id,
-                "name": player_character.name,
-                "bio": player_character.bio or "",
-                "personality": player_character.personality or "",
-                "context": player_character.context or "",
-                "secret": player_character.secret or "",
-                "violation": player_character.violation or "",
-                "image": player_character.image_filename or player_character.image or "officer.png",
-                "isVictim": player_character.is_victim,
-                "isKiller": player_character.is_killer,
-                "isAssistant": player_character.is_assistant,
-                "isPlayer": True,
-                "isPartner": player_character.is_partner,
-                "roleType": player_character.role_type,
-            }
-        else:
-            game_state["player_character"] = {}
-
         companion_idx = 0
         for key, agent in orchestrator.agents.items():
             if agent.role.value == "assistant":
@@ -441,9 +359,9 @@ class GameEngine:
             state.constitution = agent.constitution  # 已被胶囊注入过
             state.global_story = global_story
 
-            # 分配角色（companion 按顺序分配角色，DM 不分配角色）
-            if agent.role.value == "companion" and companion_idx < len(remaining_characters):
-                ch = remaining_characters[companion_idx]
+            # 分配角色（companion 按顺序分配非玩家角色，DM 不分配角色）
+            if agent.role.value == "companion" and companion_idx < len(companion_characters):
+                ch = companion_characters[companion_idx]
                 state.character = {
                     "id": ch.id,
                     "name": ch.name,
@@ -476,6 +394,270 @@ class GameEngine:
             f"已初始化 {len(game_state['agents'])} 个 Agent 游戏状态 "
             f"(game={game_id}, script={script_id})"
         )
+
+    def apply_cast(
+        self,
+        game_id: str,
+        cast: list[dict],
+        player_character_name: str | None = None,
+    ) -> dict:
+        """按前端选角结果重新分配 Agent 角色（intro 阶段）。"""
+        from api.orchestrator import orchestrator
+        from api.db.models import get_session, Script
+
+        game_state = self._games.get(game_id)
+        if not game_state:
+            raise ValueError(f"Game {game_id} not found")
+
+        current_phase = game_state.get("current_phase", GamePhase.INTRO)
+        if current_phase != GamePhase.INTRO:
+            raise ValueError("只能在 intro 阶段调整选角")
+
+        script_id = game_state.get("script_id", "")
+        global_story = ""
+        char_by_name: dict[str, dict] = {}
+        db_session = get_session()
+        try:
+            script = db_session.query(Script).filter(Script.id == script_id).first()
+            if not script:
+                raise ValueError("Script not found")
+            global_story = script.global_story or ""
+            for ch in script.characters:
+                char_by_name[ch.name] = {
+                    "id": ch.id,
+                    "name": ch.name,
+                    "bio": ch.bio or "",
+                    "personality": ch.personality or "",
+                    "context": ch.context or "",
+                    "secret": ch.secret or "",
+                    "violation": ch.violation or "",
+                    "image": ch.image_filename or ch.image or "officer.png",
+                    "isVictim": ch.is_victim,
+                    "isKiller": ch.is_killer,
+                    "isAssistant": ch.is_assistant,
+                    "isPlayer": ch.is_player,
+                    "isPartner": ch.is_partner,
+                    "roleType": ch.role_type,
+                }
+        finally:
+            db_session.close()
+
+        if player_character_name:
+            game_state["player_character_name"] = player_character_name
+
+        def resolve_orchestrator_key(raw_key: str) -> str | None:
+            if not raw_key:
+                return None
+            if raw_key in orchestrator.agents:
+                return raw_key
+            for ok, agent in orchestrator.agents.items():
+                if getattr(agent, "persona_key", "") == raw_key:
+                    return ok
+            for ok, agent in orchestrator.agents.items():
+                if agent.role.value != "companion":
+                    continue
+                if ok.endswith(f"_{raw_key}") or raw_key in ok:
+                    return ok
+            from api.agents.agent_persona_service import get_persona_by_key
+            persona = get_persona_by_key(raw_key)
+            if persona:
+                pname = persona.get("name", "")
+                for ok, agent in orchestrator.agents.items():
+                    if agent.name == pname:
+                        return ok
+            return None
+
+        new_agents: dict = {}
+        for entry in cast:
+            if entry.get("type") != "agent":
+                continue
+            raw_key = entry.get("agentKey") or entry.get("agent_key")
+            agent_key = resolve_orchestrator_key(raw_key or "")
+            role_name = (entry.get("role") or "").strip()
+            if not agent_key or not role_name:
+                continue
+            if agent_key not in orchestrator.agents:
+                continue
+            ch = char_by_name.get(role_name)
+            if not ch or ch.get("isVictim"):
+                continue
+
+            agent = orchestrator.agents[agent_key]
+            if agent.role.value == "assistant":
+                continue
+
+            old_state = game_state["agents"].get(agent_key)
+            state = AgentGameState(agent_key=agent_key, session_id=game_id)
+            state.constitution = agent.constitution
+            state.global_story = global_story
+            state.character = ch
+            state.all_actors = self._build_safe_actors_for_cast(
+                cast, char_by_name, player_character_name, exclude_key=agent_key
+            )
+            state.loaded_capsule_ids = (
+                getattr(old_state, "loaded_capsule_ids", [])
+                if old_state
+                else getattr(agent, "_loaded_capsule_ids", [])
+            )
+            new_agents[agent_key] = state
+
+        for key, old_state in game_state["agents"].items():
+            if key not in new_agents:
+                agent = orchestrator.agents.get(key)
+                if agent and agent.role.value == "dm":
+                    new_agents[key] = old_state
+
+        if not any(
+            entry.get("type") == "agent"
+            and (entry.get("agentKey") or entry.get("agent_key")) in new_agents
+            for entry in cast
+        ):
+            raise ValueError("No valid agent cast entries")
+
+        game_state["agents"].update(new_agents)
+        game_state["cast"] = cast
+        role_evidences = self._assign_role_evidences(game_state, script_id)
+        game_state["role_evidences"] = role_evidences
+        self._sync_to_db(game_state)
+
+        logger.info(f"Applied cast for game {game_id}: {len(new_agents)} agents")
+        return {"agents": len(new_agents), "cast": cast, "role_evidences": role_evidences}
+
+    def _assign_role_evidences(self, game_state: dict, script_id: str) -> dict[str, list[dict]]:
+        """为每个角色分配 4 件证物：2 件角色关联 + 2 件随机。"""
+        import json
+        import random
+        from api.db.models import get_session, ScriptEvidence
+
+        db_session = get_session()
+        try:
+            rows = db_session.query(ScriptEvidence).filter(
+                ScriptEvidence.script_id == script_id
+            ).all()
+        finally:
+            db_session.close()
+
+        if not rows:
+            return {}
+
+        all_items: list[tuple[dict, list[str]]] = []
+        by_role: dict[str, list[dict]] = {}
+        for row in rows:
+            related = (
+                json.loads(row.related_characters)
+                if isinstance(row.related_characters, str)
+                else (row.related_characters or [])
+            )
+            item = {
+                "id": row.id,
+                "name": row.name,
+                "description": row.description or "",
+                "category": row.category or "physical",
+            }
+            all_items.append((item, related))
+            for role_name in related:
+                by_role.setdefault(role_name, []).append(item)
+
+        assigned_ids: set[str] = set()
+        result: dict[str, list[dict]] = {}
+
+        def pick_for_role(role_name: str) -> list[dict]:
+            role_pool = list(by_role.get(role_name, []))
+            random.shuffle(role_pool)
+
+            fixed: list[dict] = []
+            for item in role_pool:
+                if len(fixed) >= 2:
+                    break
+                if item["id"] not in assigned_ids:
+                    fixed.append(item)
+                    assigned_ids.add(item["id"])
+
+            if len(fixed) < 2:
+                fallback = [it for it, _ in all_items if it["id"] not in assigned_ids]
+                random.shuffle(fallback)
+                for item in fallback:
+                    if len(fixed) >= 2:
+                        break
+                    fixed.append(item)
+                    assigned_ids.add(item["id"])
+
+            random_pool = [it for it, _ in all_items if it["id"] not in assigned_ids]
+            random.shuffle(random_pool)
+            extras = random_pool[: max(0, 4 - len(fixed))]
+            for item in extras:
+                assigned_ids.add(item["id"])
+
+            return (fixed + extras)[:4]
+
+        for _key, state in game_state.get("agents", {}).items():
+            role_name = (state.character or {}).get("name", "")
+            if not role_name or state.character.get("isVictim"):
+                continue
+            picks = pick_for_role(role_name)
+            state.discovered_evidences = picks
+            result[role_name] = picks
+
+        player_role = game_state.get("player_character_name", "")
+        if player_role and player_role not in result:
+            result[player_role] = pick_for_role(player_role)
+
+        return result
+
+    def _build_safe_actors_for_cast(
+        self,
+        cast: list[dict],
+        char_by_name: dict[str, dict],
+        player_character_name: str | None,
+        exclude_key: str,
+    ) -> list:
+        """从 cast 构建其他角色的安全信息（不含 secret/violation）。"""
+        actors = []
+        seen_names: set[str] = set()
+        for entry in cast:
+            role_name = (entry.get("role") or "").strip()
+            if not role_name or role_name in seen_names:
+                continue
+            if entry.get("type") == "agent":
+                key = entry.get("agentKey") or entry.get("agent_key")
+                if key == exclude_key:
+                    continue
+            ch = char_by_name.get(role_name)
+            if not ch or ch.get("isVictim"):
+                continue
+            seen_names.add(role_name)
+            actors.append({
+                "id": ch.get("id", ""),
+                "name": ch.get("name", ""),
+                "bio": ch.get("bio", ""),
+                "personality": ch.get("personality", ""),
+                "context": ch.get("context", ""),
+                "image": ch.get("image", ""),
+                "isVictim": ch.get("isVictim", False),
+                "isKiller": ch.get("isKiller", False),
+                "isAssistant": ch.get("isAssistant", False),
+                "isPlayer": ch.get("isPlayer", False),
+                "isPartner": ch.get("isPartner", False),
+                "roleType": ch.get("roleType", "suspect"),
+            })
+        if player_character_name and player_character_name not in seen_names:
+            pch = char_by_name.get(player_character_name)
+            if pch and not pch.get("isVictim"):
+                actors.append({
+                    "id": pch.get("id", ""),
+                    "name": pch.get("name", ""),
+                    "bio": pch.get("bio", ""),
+                    "personality": pch.get("personality", ""),
+                    "context": pch.get("context", ""),
+                    "image": pch.get("image", ""),
+                    "isVictim": pch.get("isVictim", False),
+                    "isKiller": pch.get("isKiller", False),
+                    "isAssistant": pch.get("isAssistant", False),
+                    "isPlayer": pch.get("isPlayer", False),
+                    "isPartner": pch.get("isPartner", False),
+                    "roleType": pch.get("roleType", "suspect"),
+                })
+        return actors
 
     def _build_safe_actors(self, game_id: str, exclude_key: str) -> list:
         """构建其他 Agent 的安全角色信息（过滤 secret/violation）。"""
@@ -525,8 +707,14 @@ class GameEngine:
                     "vote_result": game_session.result.get("vote_result") if game_session.result else None,
                     "started_at": game_session.started_at.isoformat() if game_session.started_at else "",
                     "ended_at": game_session.ended_at.isoformat() if game_session.ended_at else None,
-                    "hints_used": 0,
-                    "chat_count": 0,
+                    "hints_used": game_session.result.get("hints_used", 0) if game_session.result else 0,
+                    "chat_count": game_session.result.get("chat_count", 0) if game_session.result else 0,
+                    "public_evidences": game_session.result.get("public_evidences", []) if game_session.result else [],
+                    "role_evidences": game_session.result.get("role_evidences", {}) if game_session.result else {},
+                    "player_character_name": game_session.result.get("player_character_name", "") if game_session.result else "",
+                    "cast": game_session.result.get("cast", []) if game_session.result else [],
+                    "reveal_data": game_session.result.get("reveal_data") if game_session.result else None,
+                    "dm_review": game_session.result.get("dm_review") if game_session.result else None,
                     "agents": {},
                 }
                 self._games[game_id] = game_state
@@ -719,6 +907,90 @@ class GameEngine:
 
         self._sync_to_db(game)
 
+    def record_evidence_presentation(
+        self,
+        game_id: str,
+        evidence: dict,
+        presented_by: str,
+        presented_to: str,
+        reason: str = "",
+        ai_response: str = "",
+    ) -> dict:
+        """证物出示后写入 Agent 记忆，公开证物同步到 game.public_evidences。"""
+        game = self.get_game(game_id)
+        if not game:
+            return {"error": "game_not_found"}
+
+        from api.agents.game_context import find_agent_key
+
+        ev_id = evidence.get("id", "")
+        ev_name = evidence.get("name", "")
+        ev_desc = evidence.get("description") or evidence.get("basic_description", "")
+        presented_to_norm = (presented_to or "").strip()
+        is_public = (
+            presented_to_norm in PUBLIC_PRESENT_TARGETS
+            or presented_to_norm.lower() in PUBLIC_PRESENT_TARGETS
+        )
+
+        if is_public:
+            memory_line = f"[公共证物] {presented_by} 公开出示「{ev_name}」"
+        else:
+            memory_line = f"[证物出示] {presented_by} 向{presented_to_norm}出示「{ev_name}」"
+        if reason:
+            memory_line += f"；理由：{reason}"
+        if ai_response:
+            memory_line += f"。反应：{ai_response}"
+
+        if is_public:
+            public_list = game.setdefault("public_evidences", [])
+            if not any(e.get("id") == ev_id for e in public_list):
+                public_list.append({
+                    "id": ev_id,
+                    "name": ev_name,
+                    "description": ev_desc,
+                    "presented_by": presented_by,
+                    "reason": reason,
+                    "ai_response": ai_response,
+                    "presented_at": datetime.now(timezone.utc).isoformat(),
+                })
+
+            for _key, state in game.get("agents", {}).items():
+                state.chat_history.append({"role": "public", "content": memory_line})
+                if ev_id and not any(e.get("id") == ev_id for e in state.discovered_evidences):
+                    state.discovered_evidences.append({
+                        "id": ev_id,
+                        "name": ev_name,
+                        "description": ev_desc,
+                        "source": "公开出示",
+                        "visibility": "public",
+                    })
+        else:
+            target_key = find_agent_key(game, presented_to_norm)
+            if target_key:
+                target_state = game.get("agents", {}).get(target_key)
+                if target_state:
+                    target_state.chat_history.append({"role": "private", "content": memory_line})
+                    if ev_id and not any(e.get("id") == ev_id for e in target_state.discovered_evidences):
+                        target_state.discovered_evidences.append({
+                            "id": ev_id,
+                            "name": ev_name,
+                            "description": ev_desc,
+                            "source": f"{presented_by}私聊出示",
+                            "visibility": "private",
+                        })
+
+            presenter_key = find_agent_key(game, presented_by)
+            if presenter_key:
+                presenter_state = game.get("agents", {}).get(presenter_key)
+                if presenter_state:
+                    presenter_state.chat_history.append({
+                        "role": presenter_key,
+                        "content": memory_line,
+                    })
+
+        self._sync_to_db(game)
+        return {"success": True, "public": is_public}
+
     def record_hint(self, game_id: str) -> None:
         """记录一次提示使用。"""
         game = self.get_game(game_id)
@@ -726,8 +998,69 @@ class GameEngine:
             game["hints_used"] = game.get("hints_used", 0) + 1
             self._sync_to_db(game)
 
+    def _get_correct_killer(self, game_id: str) -> str:
+        game = self.get_game(game_id)
+        if not game:
+            return ""
+        db_session = get_session()
+        try:
+            from api.db.models import Script
+            script = db_session.query(Script).filter(Script.id == game.get("script_id", "")).first()
+            if script:
+                return (script.killer_role or script.fixed_killer or "").strip()
+        finally:
+            db_session.close()
+        return ""
+
+    def _get_votable_roles(self, game_id: str) -> list[str]:
+        game = self.get_game(game_id)
+        if not game:
+            return []
+        roles: list[str] = []
+        for _key, state in game.get("agents", {}).items():
+            ch = state.character or {}
+            if ch.get("isVictim") or ch.get("roleType") == "dm":
+                continue
+            name = (ch.get("name") or "").strip()
+            if name and name not in roles:
+                roles.append(name)
+        return roles
+
+    def _vote_tallies(self, game: dict) -> dict[str, int]:
+        tallies: dict[str, int] = {}
+        for vote in game.get("votes", []):
+            killer = vote.get("killer", "")
+            if killer:
+                tallies[killer] = tallies.get(killer, 0) + 1
+        return tallies
+
+    def _refresh_vote_result(self, game: dict, game_id: str) -> dict:
+        """以玩家（侦探）投票为准判定胜负，并汇总票数。"""
+        correct_killer = self._get_correct_killer(game_id)
+
+        player_vote = next(
+            (v for v in game.get("votes", []) if v.get("voter") in PLAYER_VOTERS),
+            None,
+        )
+        primary = player_vote or (game.get("votes")[-1] if game.get("votes") else None)
+        if not primary:
+            return {}
+
+        is_correct = (primary["killer"] == correct_killer) if correct_killer else True
+        result = {
+            "killer": primary["killer"],
+            "motive": primary.get("motive", ""),
+            "voter": primary.get("voter", "player"),
+            "is_correct": is_correct,
+            "correct_killer": correct_killer,
+            "accused_killer": primary["killer"],
+            "tallies": self._vote_tallies(game),
+        }
+        game["vote_result"] = result
+        return result
+
     def submit_vote(self, game_id: str, killer: str, motive: str = "", voter: str = "player") -> dict:
-        """提交推理投票。"""
+        """提交推理投票（同一投票者可改票）。"""
         game = self.get_game(game_id)
         if not game:
             return {"error": "game_not_found"}
@@ -735,41 +1068,170 @@ class GameEngine:
         if GamePhase(game["current_phase"]) != GamePhase.VOTING:
             return {"error": "not_in_voting_phase"}
 
+        killer = (killer or "").strip()
+        if not killer:
+            return {"error": "killer_required"}
+
         vote = {
             "voter": voter,
             "killer": killer,
-            "motive": motive,
+            "motive": motive or "",
             "voted_at": datetime.now(timezone.utc).isoformat(),
         }
-        game["votes"].append(vote)
 
-        # 查询正确答案
-        db_session = get_session()
+        votes = game.setdefault("votes", [])
+        replaced = False
+        for idx, existing in enumerate(votes):
+            if existing.get("voter") == voter:
+                votes[idx] = vote
+                replaced = True
+                break
+        if not replaced:
+            votes.append(vote)
+
+        game["game_id"] = game_id
+        result = self._refresh_vote_result(game, game_id)
+        self._sync_to_db(game)
+
+        is_player = voter in PLAYER_VOTERS
+        is_correct = result.get("is_correct", True) if is_player else None
+        correct_killer = result.get("correct_killer", "")
+
+        return {
+            "success": True,
+            "is_correct": is_correct,
+            "correct_killer": correct_killer if is_player and not is_correct else "",
+            "message": (
+                "推理正确！"
+                if is_player and is_correct
+                else f"推理有误，真凶是{correct_killer}"
+                if is_player and correct_killer
+                else "投票已记录"
+            ),
+            "votes": votes,
+            "tallies": result.get("tallies", {}),
+            "voted_count": len(votes),
+            "vote_result": result,
+        }
+
+    def _generate_agent_vote(
+        self,
+        game_id: str,
+        agent_key: str,
+        state,
+        suspects: list[str],
+        correct_killer: str,
+    ) -> tuple[str, str]:
+        my_role = (state.character or {}).get("name", "").strip()
+        others = [s for s in suspects if s and s != my_role]
+        if not others:
+            return "", ""
+
+        if my_role == correct_killer:
+            import random
+            target = random.choice(others)
+            return target, f"我认为{target}的嫌疑最大，多条线索指向其作案可能。"
+
+        chat_recent = "\n".join(
+            f"{m.get('role', '?')}: {m.get('content', '')}"
+            for m in (state.chat_history or [])[-8:]
+        )
+        suspect_list = "、".join(others)
+        prompt = (
+            f"你是剧本杀角色「{my_role}」。现在进入投票阶段。\n"
+            f"可选嫌疑人：{suspect_list}\n"
+            f"你的记忆与讨论摘要：{state.compressed_summary or '（无）'}\n"
+            f"最近对话：\n{chat_recent or '（无）'}\n\n"
+            "请根据已知信息投票。输出严格 JSON：\n"
+            '{"killer": "角色名", "motive": "30字内理由"}\n'
+            "killer 必须是上述嫌疑人之一，不能投自己。"
+        )
         try:
-            from api.db.models import Script
-            script = db_session.query(Script).filter(Script.id == game["script_id"]).first()
-            correct_killer = script.killer_role if script else ""
-            is_correct = (killer == correct_killer) if correct_killer else True
+            import json
+            from api.llm.llm_service import respond_initial
 
-            game["vote_result"] = {
-                "killer": killer,
+            raw = respond_initial(
+                system_prompt=(
+                    "你是剧本杀中的嫌疑人角色，正在独立提交推理投票。"
+                    "不要泄露自己的秘密，按 JSON 输出。"
+                ),
+                user_message=prompt,
+                temperature=0.6,
+                max_tokens=200,
+            )
+            json_str = raw.strip()
+            if "```json" in json_str:
+                json_str = json_str.split("```json")[1].split("```")[0].strip()
+            elif "```" in json_str:
+                json_str = json_str.split("```")[1].split("```")[0].strip()
+            parsed = json.loads(json_str)
+            target = (parsed.get("killer") or "").strip()
+            motive = (parsed.get("motive") or "").strip()
+            if target not in others:
+                target = others[0]
+            return target, motive or f"综合讨论，我认为{target}最为可疑。"
+        except Exception as e:
+            logger.warning(f"Agent {agent_key} 投票 LLM 失败: {e}")
+            import random
+            target = random.choice(others)
+            return target, f"根据现有线索，我投给{target}。"
+
+    def submit_agent_votes(self, game_id: str) -> dict:
+        """为所有 Agent 角色生成并提交投票。"""
+        game = self.get_game(game_id)
+        if not game:
+            return {"error": "game_not_found"}
+
+        if GamePhase(game["current_phase"]) != GamePhase.VOTING:
+            return {"error": "not_in_voting_phase"}
+
+        suspects = self._get_votable_roles(game_id)
+        correct_killer = self._get_correct_killer(game_id)
+        if not suspects:
+            return {"error": "no_suspects"}
+
+        agent_results = []
+        for agent_key, state in game.get("agents", {}).items():
+            ch = state.character or {}
+            if ch.get("isVictim") or ch.get("roleType") == "dm":
+                continue
+            role_name = (ch.get("name") or "").strip()
+            if not role_name:
+                continue
+            if any(v.get("voter") == agent_key for v in game.get("votes", [])):
+                continue
+
+            target, motive = self._generate_agent_vote(
+                game_id, agent_key, state, suspects, correct_killer,
+            )
+            if not target:
+                continue
+
+            vote_result = self.submit_vote(game_id, target, motive, voter=agent_key)
+            agent_results.append({
+                "agent_key": agent_key,
+                "role": role_name,
+                "killer": target,
                 "motive": motive,
-                "is_correct": is_correct,
-                "correct_killer": correct_killer,
-            }
+                "success": vote_result.get("success", False),
+            })
 
-            self._sync_to_db(game)
+        game = self.get_game(game_id) or game
+        return {
+            "success": True,
+            "agent_votes": agent_results,
+            "votes": game.get("votes", []),
+            "tallies": self._vote_tallies(game),
+            "vote_result": game.get("vote_result"),
+            "voted_count": len(game.get("votes", [])),
+        }
 
-            return {
-                "success": True,
-                "is_correct": is_correct,
-                "correct_killer": correct_killer if not is_correct else "",
-                "message": "推理正确！" if is_correct else f"推理有误，真凶是{correct_killer}",
-            }
-        finally:
-            db_session.close()
-
-    def force_phase(self, game_id: str, target_phase: str) -> dict:
+    def force_phase(
+        self,
+        game_id: str,
+        target_phase: str,
+        frontend_phase_index: int | None = None,
+    ) -> dict:
         """强制跳转到指定阶段（DM权限，用于调试或异常恢复）。"""
         game = self.get_game(game_id)
         if not game:
@@ -782,6 +1244,8 @@ class GameEngine:
 
         previous = game["current_phase"]
         game["current_phase"] = phase.value
+        if frontend_phase_index is not None:
+            game["frontend_phase_index"] = frontend_phase_index
         game["phase_history"].append({
             "phase": phase.value,
             "entered_at": datetime.now(timezone.utc).isoformat(),
@@ -790,6 +1254,7 @@ class GameEngine:
 
         if phase == GamePhase.REVIEW:
             game["ended_at"] = datetime.now(timezone.utc).isoformat()
+            self._trigger_capsule_generation(game_id, game.get("script_id", ""))
 
         self._sync_to_db(game)
 
@@ -805,54 +1270,6 @@ class GameEngine:
     # ============================
     # Agent 游戏状态 API
     # ============================
-
-    def _companion_keys(self, game: dict) -> list[str]:
-        return [
-            key
-            for key, state in game.get("agents", {}).items()
-            if state.character.get("roleType") == "companion"
-        ]
-
-    def init_speak_round(self, game_id: str) -> dict:
-        game = self.get_game(game_id)
-        if not game:
-            return {"error": "game_not_found"}
-
-        speak_round = SpeakRoundState(self._companion_keys(game))
-        game["speak_round"] = speak_round
-        self._sync_to_db(game)
-        return {"success": True, **speak_round.to_dict()}
-
-    def get_speak_round(self, game_id: str) -> dict:
-        game = self.get_game(game_id)
-        if not game:
-            return {"error": "game_not_found"}
-
-        speak_round = game.get("speak_round")
-        if not speak_round:
-            return {"error": "speak_round_not_initialized"}
-
-        if hasattr(speak_round, "to_dict"):
-            return {"success": True, **speak_round.to_dict()}
-        if isinstance(speak_round, dict):
-            return {"success": True, **speak_round}
-        return {"error": "invalid_speak_round_state"}
-
-    def next_speaker(self, game_id: str) -> dict:
-        game = self.get_game(game_id)
-        if not game:
-            return {"error": "game_not_found"}
-
-        speak_round = game.get("speak_round")
-        if not speak_round:
-            return {"error": "speak_round_not_initialized"}
-
-        result = speak_round.next()
-        self._sync_to_db(game)
-        return {"success": True, **result}
-
-    def start_new_round(self, game_id: str) -> dict:
-        return self.init_speak_round(game_id)
 
     def get_agent_state(self, game_id: str, agent_key: str) -> Optional[dict]:
         """获取指定 Agent 的游戏状态。"""
@@ -1120,44 +1537,39 @@ class GameEngine:
     def force_answer(
         self, game_id: str, asker_key: str, target_key: str, question: str
     ) -> dict:
-        """强制指定 Agent 回答问题——插入发言队列最前面，其他角色不可插队。
-
-        Args:
-            asker_key: 提问者（通常是 "player"）
-            target_key: 被指定的 Agent key
-            question: 问题内容
-        Returns:
-            {"success": bool, "target_key": str, "question": str}
-        """
+        """记录公共喊话——被喊话者须立刻回复，但不改变发言队列顺序。"""
         game = self.get_game(game_id)
         if not game:
             return {"error": "game_not_found"}
 
-        # 确认目标 Agent 存在
         target_state = game.get("agents", {}).get(target_key)
         if not target_state:
             return {"error": "target_agent_not_found"}
 
-        # 写入目标 Agent 的 chat_history
+        asker_label = asker_key if asker_key != "player" else "玩家"
         target_state.chat_history.append({
-            "role": asker_key,
-            "content": f"[强制回答] {question}",
+            "role": asker_label,
+            "content": f"[喊话] {question}",
         })
 
-        # 如果有发言轮次，将目标插入队列最前面
-        speak_round = game.get("speak_round")
-        if speak_round:
-            speak_round.interject(target_key, reason=f"被{asker_key}强制指定回答")
+        public_list = game.get("public_evidences") or []
+        if public_list:
+            pub_summary = "；".join(
+                f"【{ev.get('presented_by', '?')} 公开】{ev.get('name', '?')}：{ev.get('description', '')}"
+                for ev in public_list[-6:]
+            )
+            target_state.chat_history.append({
+                "role": "public",
+                "content": f"[喊话语境·已公开证物] {pub_summary}",
+            })
 
-        # 记录强制回答状态
-        if "force_answer_state" not in game:
-            game["force_answer_state"] = None
-        game["force_answer_state"] = {
-            "asker": asker_key,
-            "target": target_key,
-            "question": question,
-            "active": True,
-        }
+        for key, state in game.get("agents", {}).items():
+            if key == target_key:
+                continue
+            state.chat_history.append({
+                "role": "public",
+                "content": f"[喊话] {asker_label} 向{target_state.character.get('name', target_key)}喊话：{question}",
+            })
 
         self._sync_to_db(game)
 
@@ -1221,8 +1633,13 @@ class GameEngine:
                 "vote_result": game_state.get("vote_result"),
                 "hints_used": game_state.get("hints_used", 0),
                 "chat_count": game_state.get("chat_count", 0),
-                "player_role_id": game_state.get("player_role_id", ""),
-                "player_character": game_state.get("player_character", {}),
+                "public_evidences": game_state.get("public_evidences", []),
+                "role_evidences": game_state.get("role_evidences", {}),
+                "player_character_name": game_state.get("player_character_name", ""),
+                "cast": game_state.get("cast", []),
+                "frontend_phase_index": game_state.get("frontend_phase_index"),
+                "reveal_data": game_state.get("reveal_data"),
+                "dm_review": game_state.get("dm_review"),
             }
 
             if game_state.get("ended_at"):
@@ -1285,16 +1702,18 @@ class GameEngine:
                 db_session.close()
 
     def _trigger_capsule_generation(self, game_id: str, script_id: str) -> None:
-        """进入复盘阶段时自动触发胶囊生成流程。"""
+        """进入复盘阶段时触发完整自进化流水线。"""
         try:
-            from api.capsules.capsule_service import review_and_generate_capsules
-            result = review_and_generate_capsules(
-                session_id=game_id,
-                script_id=script_id,
+            from api.capsules.dm_evolution_service import run_full_evolution_pipeline
+            result = run_full_evolution_pipeline(game_id)
+            summary = result.get("evolution_summary", {})
+            logger.info(
+                f"复盘自进化完成: game={game_id}, "
+                f"genes={summary.get('genes_created', 0)}, "
+                f"capsules={summary.get('capsules_created', 0)}"
             )
-            logger.info(f"复盘胶囊生成完成: game={game_id}, genes={len(result.get('genes', []))}, capsules={len(result.get('capsules', []))}")
         except Exception as e:
-            logger.error(f"复盘胶囊生成失败: {e}")
+            logger.error(f"复盘自进化失败: {e}")
 
     def _auto_post_game_reveal(self, game_id: str) -> dict:
         """从 VOTING 进入 REVEAL 时自动触发后剧情生成。
@@ -1335,20 +1754,19 @@ class GameEngine:
             return {"error": str(e)}
 
     def _load_capsules_for_agents(self) -> None:
-        """新局开始前，为所有 Agent 搜索并消费历史胶囊，融入 constitution。"""
+        """新局开始前，为所有 Agent 注入全部历史胶囊。"""
         try:
-            from api.capsules.capsule_service import get_capsules_for_agent
+            from api.capsules.dm_evolution_service import load_all_capsules_prompt, _resolve_agent_db_id
             from api.orchestrator import orchestrator
 
             for key, agent in orchestrator.agents.items():
-                capsule_prompt = get_capsules_for_agent(
-                    agent_role=agent.role.value,
-                    signals=agent.domains,
-                    limit=3,
-                )
-                if capsule_prompt:
-                    agent.constitution += capsule_prompt
-                    logger.info(f"Agent {agent.name} 已加载历史胶囊经验")
+                if not agent.registered or not agent.node_id:
+                    continue
+                db_id = _resolve_agent_db_id(agent.node_id) or agent.node_id
+                prompt = load_all_capsules_prompt(db_id, agent.role.value)
+                if prompt and prompt not in (agent.constitution or ""):
+                    agent.constitution = (agent.constitution or "") + prompt
+                    logger.info(f"Agent {agent.name} 已注入全部历史胶囊")
         except Exception as e:
             logger.error(f"加载胶囊经验失败: {e}")
 

@@ -4,7 +4,9 @@ export type GamePhaseId =
   | "intro"
   | "search"
   | "discussion"
-  | "vote";
+  | "vote"
+  | "reveal"
+  | "review";
 
 export type PlayerStatus =
   | "空闲"
@@ -22,6 +24,7 @@ export type GamePlayer = {
   role: string;
   publicIdentity: string;
   agent: boolean;
+  agentKey?: string;
   color: string;
   status: PlayerStatus;
   tags: string[];
@@ -46,6 +49,8 @@ export const GAME_PHASES: Array<{ id: GamePhaseId; label: string; shortLabel: st
   { id: "search", label: "随机搜证", shortLabel: "搜证" },
   { id: "discussion", label: "公共讨论 2：线索交流", shortLabel: "线索交流" },
   { id: "vote", label: "推理投票", shortLabel: "投票" },
+  { id: "reveal", label: "真相揭示", shortLabel: "真相" },
+  { id: "review", label: "复盘反思", shortLabel: "复盘" },
 ];
 
 export const GAME_PLAYERS: GamePlayer[] = [
@@ -114,6 +119,17 @@ export const GAME_PLAYERS: GamePlayer[] = [
     status: "空闲",
     tags: ["现场", "工人关系", "行动派"],
     background: "熟悉厂区结构和旧员工关系，但对事故当晚闭口不谈。",
+  },
+  {
+    id: "lin",
+    name: "林远",
+    role: "林远",
+    publicIdentity: "旧保安",
+    agent: false,
+    color: "indigo",
+    status: "空闲",
+    tags: ["谨慎", "胆小", "善于观察"],
+    background: "12年前在锈铁大道值夜班，事故当晚声称「什么都没看到」，但证词前后不一。",
   },
 ];
 
@@ -192,6 +208,13 @@ export const INTRO_LINES: Record<string, string> = {
   crow: "我是沈禾，调查记者。过去三年，我收到了七封署名不同、笔迹相同的匿名信。",
   su: "我是周岚，事故当晚在诊所值班。我见过一个不愿留下姓名的伤者。",
   echo: "我是秦野，前工头。厂区结构我最熟，但别指望我替任何人掩盖事实。",
+  lin: "我是林远，以前在这里当夜班保安。那天晚上……我什么都没看到。",
+  "周野": "我是周野，十二年前负责这里的门禁维修。我回来只想弄清楚那段缺失记录是谁改的。",
+  "顾沉": "我是顾沉，事故档案由我保管。档案确实缺页，但缺失并不是最近才发生。",
+  "沈禾": "我是沈禾，调查记者。过去三年，我收到了七封署名不同、笔迹相同的匿名信。",
+  "周岚": "我是周岚，事故当晚在诊所值班。我见过一个不愿留下姓名的伤者。",
+  "秦野": "我是秦野，前工头。厂区结构我最熟，但别指望我替任何人掩盖事实。",
+  "林远": "我是林远，以前在这里当夜班保安。那天晚上……我什么都没看到。",
 };
 
 export const PRIVATE_THREADS = [

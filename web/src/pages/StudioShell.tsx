@@ -1,6 +1,5 @@
 import React from "react";
 import {
-  ActionIcon,
   AppShell,
   Avatar,
   Badge,
@@ -20,10 +19,7 @@ import {
   IconDeviceGamepad2,
   IconLayoutDashboard,
   IconRobot,
-  IconVolume,
-  IconVolumeOff,
 } from "@tabler/icons-react";
-import { useBgm } from "../hooks/useBgm";
 
 const NAV_ITEMS = [
   { key: "library", label: "剧本库", to: "/library", icon: IconArchive },
@@ -51,11 +47,10 @@ export function StudioShell({
 }: StudioShellProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const bgm = useBgm();
   const isItemActive = (item: (typeof NAV_ITEMS)[number]) =>
     location.pathname === item.to ||
     location.pathname.startsWith(`${item.to}/`) ||
-    (item.key === "games" && location.pathname.startsWith("/play/"));
+    (item.key === "games" && (location.pathname.startsWith("/play/") || location.pathname.startsWith("/review/")));
 
   return (
     <AppShell className="studio-shell" header={{ height: 88 }} padding={0}>
@@ -105,17 +100,6 @@ export function StudioShell({
             </Group>
 
             <Group gap="xs" wrap="nowrap">
-              {/* 背景音乐控制按钮 */}
-              <ActionIcon
-                variant="subtle"
-                color="gray"
-                radius="xl"
-                size="lg"
-                onClick={() => bgm.toggle()}
-                aria-label={bgm.isPlaying ? "暂停背景音乐" : "播放背景音乐"}
-              >
-                {bgm.isPlaying ? <IconVolume size={20} /> : <IconVolumeOff size={20} />}
-              </ActionIcon>
               {/* <Button
                 variant="light"
                 leftSection={<IconDeviceGamepad2 size={16} />}

@@ -67,55 +67,78 @@ evo-murder-game/
 
 > **环境要求**：Python 3.11+、Node.js 18+
 
-### 1. 后端启动
+### 1. 后端启动（必须使用端口 8000）
 
 ```bash
-# 创建并激活虚拟环境（必须，确保团队依赖一致）
+# 克隆仓库
+git clone <repo-url> && cd evo-murder-game
+
+# 创建并激活虚拟环境
 python -m venv .venv
 
 # Windows PowerShell
 .\.venv\Scripts\Activate.ps1
 
 # macOS / Linux
-# source .venv/bin/activate
+source .venv/bin/activate
 
-# 安装依赖（在虚拟环境中）
+# 安装依赖
 pip install -r api/requirements.txt
 
-# 配置环境变量
-cp api/config/.env.example api/config/.env   # 编辑 .env 填入你的 API Key
+# 配置环境变量（复盘、DM评分、基因胶囊生成均依赖 LLM，必须配置 API_KEY）
+cp api/config/.env.example api/config/.env
+# 编辑 api/config/.env，填入你的 API_KEY 和 OPENAI_API_BASE
 
-# 启动服务
-python -m uvicorn api.main:app --reload --port 10001
+# 启动后端（端口必须为 8000，前端默认请求 localhost:8000）
+python -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+> **Windows PowerShell 无法激活虚拟环境时**：无需修改执行策略，直接用：
+> `.\.venv\Scripts\python.exe -m uvicorn api.main:app --reload --port 8000`
+
+验证后端：浏览器访问 <http://localhost:8000/health> 应返回 `ok`。
 
 ### 2. 前端启动
 
 ```bash
 cd web
 npm install
-npm start                    # 默认端口 3000，API指向 localhost:10001
+npm start    # 默认端口 3000，API 代理到 localhost:8000
 ```
 
-当前前端是暗黑剧场风格的静态可交互原型，包含 `/library`、`/play/:id`、
-`/agents` 和 `/evolution` 四个主页面。页面演示数据目前定义在对应的页面组件内，
-尚未全部接入后端 API。
+前端 `package.json` 的 `proxy` 已配置为 `http://localhost:8000`，
+`npm start` 无需额外环境变量即可跨平台（Windows/macOS/Linux）运行。
 
-`web/figma-make/` 是从 Figma Make 导出的独立 Vite 工程，仅用于视觉和布局参考，
-不参与 `web/` 主应用的 Create React App 构建。详细说明见
-[web/README.md](web/README.md) 和 [web/figma-make/README.md](web/figma-make/README.md)。
-
-### 3. EvoMap Agent 注册
-
-访问前端 `/agents` 页面，或直接调用 API：
-
+如需自定义后端地址：
 ```bash
-curl -X POST http://localhost:10001/agents/register \
-  -H "Content-Type: application/json" \
-  -d '{"role": "companion", "name": "小七", "model": "evomap-gemini-3.1-pro-preview"}'
+# macOS / Linux
+REACT_APP_API_URL=http://your-host:8000 npm start
+
+# Windows PowerShell
+$env:REACT_APP_API_URL="http://your-host:8000"; npm start
 ```
 
-> **注意**：`.venv/` 已加入 `.gitignore`，不会提交到仓库。每位协作者需自行创建虚拟环境。
+### 3. 数据库
+
+仓库自带 `data/murder_mystery.db`（含 13 个剧本、85 个角色），clone 后即可使用。
+若数据库为空或需要导入新剧本，运行：
+```bash
+python scripts/import_xiutie_script.py
+```
+
+### 4. 开始游戏
+
+1. 浏览器打开 <http://localhost:3000> → 剧本库
+2. 选择剧本 → 选角 → 进入游戏
+3. 游戏流程：开场介绍 → 自由调查 → 提交推理 → 真相揭示 → 复盘反思
+4. 复盘看板：游戏结束后点击「打开复盘看板」跳转 `/review/:id?session=...`
+
+### 重要注意事项
+
+- **端口必须为 8000**：前端所有 API 请求默认指向 `localhost:8000`，改端口会导致阶段切换、投票、复盘全部失败
+- **必须配置 API_KEY**：`api/config/.env` 中的 `API_KEY` 和 `OPENAI_API_BASE` 是复盘评分、胶囊生成的必要条件，缺配则这些功能静默失败
+- **`.env` 不在 git 中**：每位协作者需自行从 `.env.example` 复制并填写
+- **从项目根目录启动后端**：不要进入 `api/` 目录再启动，项目使用 `api.*` 绝对导入
 
 ## 后端 API 总览
 

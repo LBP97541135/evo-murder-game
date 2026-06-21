@@ -32,15 +32,25 @@ web/
 
 ## 启动与构建
 
-```powershell
+```bash
 cd web
 npm install
 npm start
 ```
-c
-开发服务器默认地址为 `http://localhost:3000`，前端 API 地址为
-`http://localhost:10001`。`start` 脚本使用 Windows `set` 语法；
-在 PowerShell 执行策略限制 `npm.ps1` 时，可以使用 `npm.cmd start`。
+
+开发服务器默认地址为 `http://localhost:3000`，前端 API 通过 `package.json`
+的 `proxy` 代理到 `http://localhost:8000`。`npm start` 无需额外环境变量，
+跨平台（Windows/macOS/Linux）直接运行。
+
+如需自定义后端地址：
+
+```bash
+# macOS / Linux
+REACT_APP_API_URL=http://localhost:8000 npm start
+
+# Windows PowerShell
+$env:REACT_APP_API_URL="http://localhost:8000"; npm start
+```
 
 生产构建：
 
@@ -113,7 +123,6 @@ npm run build
 
 ## 已知限制
 
-- `npm start` 当前是 Windows 专用脚本；跨平台运行需要改用 `cross-env`
-  或通过 shell 设置 `REACT_APP_API_URL`。
-- 外部封面图片和 Google Fonts 需要网络访问。
-- `figma-make/` 未安装依赖时无法直接执行 `npm run dev` 或 `npm run build`。
+- `npm start` 已改为跨平台兼容（直接 `react-scripts start`），不再依赖 Windows 专用语法
+- 外部封面图片和 Google Fonts 需要网络访问
+- `figma-make/` 未安装依赖时无法直接执行 `npm run dev` 或 `npm run build`

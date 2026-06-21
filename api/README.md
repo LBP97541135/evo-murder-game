@@ -107,19 +107,19 @@ DB_CONN_URL=postgresql+psycopg://用户名:密码@localhost:5432/数据库名
 推荐从项目根目录启动：
 
 ```powershell
-python -m uvicorn api.main:app --reload --host 0.0.0.0 --port 10001
+python -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 未激活 Windows 虚拟环境时：
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn api.main:app --reload --host 0.0.0.0 --port 10001
+.\.venv\Scripts\python.exe -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 macOS / Linux 命令相同：
 
 ```bash
-python -m uvicorn api.main:app --reload --host 0.0.0.0 --port 10001
+python -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 不要进入 `api/` 目录后执行 `uvicorn main:app`，项目内部使用 `api.*`
@@ -129,37 +129,43 @@ python -m uvicorn api.main:app --reload --host 0.0.0.0 --port 10001
 
 启动成功后访问：
 
-- 健康检查：<http://localhost:10001/health>
-- Swagger API 文档：<http://localhost:10001/docs>
-- OpenAPI JSON：<http://localhost:10001/openapi.json>
+- 健康检查：<http://localhost:8000/health>
+- Swagger API 文档：<http://localhost:8000/docs>
+- OpenAPI JSON：<http://localhost:8000/openapi.json>
 
 PowerShell 验证命令：
 
 ```powershell
-Invoke-RestMethod http://localhost:10001/health
+Invoke-RestMethod http://localhost:8000/health
 ```
 
 或者：
 
 ```powershell
-curl.exe http://localhost:10001/health
+curl.exe http://localhost:8000/health
 ```
 
 ### 7. 同时启动前端
 
 另开一个终端：
 
-```powershell
+```bash
 cd web
-npm.cmd install
-npm.cmd start
+npm install
+npm start
 ```
 
-前端默认连接 `http://localhost:10001`。需要使用其他后端地址时设置：
+前端默认连接 `http://localhost:8000`（通过 `package.json` 的 `proxy` 配置）。
+`npm start` 已改为跨平台兼容，无需设置环境变量即可在 Windows/macOS/Linux 运行。
 
-```powershell
-$env:REACT_APP_API_URL="http://localhost:10001"
-npm.cmd start
+如需自定义后端地址：
+
+```bash
+# macOS / Linux
+REACT_APP_API_URL=http://localhost:8000 npm start
+
+# Windows PowerShell
+$env:REACT_APP_API_URL="http://localhost:8000"; npm start
 ```
 
 ### 常见问题
@@ -169,7 +175,7 @@ npm.cmd start
 确认当前目录是项目根目录，并使用：
 
 ```powershell
-python -m uvicorn api.main:app --reload --port 10001
+python -m uvicorn api.main:app --reload --port 8000
 ```
 
 #### PowerShell 无法运行 `Activate.ps1`
@@ -177,7 +183,7 @@ python -m uvicorn api.main:app --reload --port 10001
 无需修改系统执行策略，可以直接使用虚拟环境中的 Python：
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn api.main:app --reload --port 10001
+.\.venv\Scripts\python.exe -m uvicorn api.main:app --reload --port 8000
 ```
 
 #### SQLite 报 `unable to open database file`

@@ -1,4 +1,6 @@
 import React from "react";
+const bgmUrl = new URL("../video_picture/剧本杀BGM.mp3", import.meta.url).href;
+
 import { StudioShell } from "./StudioShell";
 import {
   ActionIcon,
@@ -15,6 +17,7 @@ import {
   Radio,
   ScrollArea,
   Select,
+  Slider,
   Stack,
   Tabs,
   Text,
@@ -30,6 +33,7 @@ import {
   IconClock,
   IconHighlight,
   IconMaximize,
+  IconMusic,
   IconSearch,
   IconSend,
   IconSettings,
@@ -481,6 +485,9 @@ function GamePage() {
   const [publicMessage, setPublicMessage] = React.useState("");
   const [feedback, setFeedback] = React.useState("欢迎进入游戏，请点击圆桌席位选择你喜欢的角色");
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [bgmPlaying, setBgmPlaying] = React.useState(false);
+  const [bgmVolume, setBgmVolume] = React.useState(0.4);
+  const bgmRef = React.useRef<HTMLAudioElement | null>(null);
   const [speakerSeconds, setSpeakerSeconds] = React.useState(90);
   const [voteSuspect, setVoteSuspect] = React.useState("");
   const [voteReason, setVoteReason] = React.useState("");
@@ -532,6 +539,25 @@ function GamePage() {
   } | null>(null);
   const [spoilerStory, setSpoilerStory] = React.useState("");
   const reflectionSentRef = React.useRef(false);
+
+  // BGM 控制
+  React.useEffect(() => {
+    if (!bgmRef.current) {
+      const audio = new Audio(bgmUrl);
+      audio.loop = true;
+      audio.volume = bgmVolume;
+      bgmRef.current = audio;
+    }
+    if (bgmPlaying) {
+      bgmRef.current.play().catch(() => setBgmPlaying(false));
+    } else {
+      bgmRef.current.pause();
+    }
+  }, [bgmPlaying]);
+
+  React.useEffect(() => {
+    if (bgmRef.current) bgmRef.current.volume = bgmVolume;
+  }, [bgmVolume]);
 
   // Session 恢复效果（页面刷新后重建 UI 状态，且不降级已推进的前端阶段）
   React.useEffect(() => {
@@ -1809,7 +1835,13 @@ function GamePage() {
 
     const chatMessages: LLMMessage[] = [{
       role: "user",
-      content: `玩家私聊对你说："${content}"\n（这是私聊，公共讨论听不到。请以角色身份自然回复，不要泄露角色秘密，可以回避或转移话题。）`,
+      content: (
+        `【私聊】玩家对你说：「${content}」\n`
+        + `你是陪玩 Agent「${targetPlayer.name}」，正在本局中扮演剧本角色「${targetPlayer.role}」。\n`
+        + `请以 Agent 人设（${targetPlayer.name}）+ 剧本角色（${targetPlayer.role}）的身份用第一人称回复。\n`
+        + `玩家是在对你（${targetPlayer.name}）说话，不要把自己当成旁观者在评论「${targetPlayer.name}」。\n`
+        + `这是私聊，公共讨论听不到。不要泄露角色 secret，可自然回避或转移话题。`
+      ),
     }];
 
     const req: InvocationRequest = {
@@ -2882,7 +2914,7 @@ function GamePage() {
                   <Text fw={800}>{current?.role || "暂无"} → {nextSpeaker?.role || (discussionRoundIdle ? "可开启下一轮" : "等待申请")}</Text>
                 </Box>
               </Group>
-              <Group gap="xs"><Badge size="lg" color="orange" leftSection={<IconClock size={13} />}>{formatTime(speakerSeconds)}</Badge><Button size="xs" variant="light" onClick={() => setDialog("rules")}>游戏规则</Button><Button size="xs" variant="light" color="red" onClick={clearGameProgress}>重置进度</Button><Tooltip label={fullscreen ? "退出全屏" : "全屏"}><ActionIcon size="lg" onClick={toggleFullscreen}>{fullscreen ? <IconX size={18} /> : <IconMaximize size={18} />}</ActionIcon></Tooltip><ActionIcon size="lg" variant={settingsOpen ? "filled" : "light"} onClick={() => setSettingsOpen((value) => !value)}><IconSettings size={18} /></ActionIcon><Button size="xs" color="red" variant="subtle" onClick={() => navigate("/games")}>退出</Button></Group>
+              <Group gap="xs"><Badge size="lg" color="orange" leftSection={<IconClock size={13} />}>{formatTime(speakerSeconds)}</Badge><Tooltip label={bgmPlaying ? "暂停BGM" : "播放BGM"}><ActionIcon size="lg" variant={bgmPlaying ? "filled" : "light"} color={bgmPlaying ? "teal" : "gray"} onClick={() => setBgmPlaying((v) => !v)}><IconMusic size={18} /></ActionIcon></Tooltip><Button size="xs" variant="light" onClick={() => setDialog("rules")}>游戏规则</Button><Button size="xs" variant="light" color="red" onClick={clearGameProgress}>重置进度</Button><Tooltip label={fullscreen ? "退出全屏" : "全屏"}><ActionIcon size="lg" onClick={toggleFullscreen}>{fullscreen ? <IconX size={18} /> : <IconMaximize size={18} />}</ActionIcon></Tooltip><ActionIcon size="lg" variant={settingsOpen ? "filled" : "light"} onClick={() => setSettingsOpen((value) => !value)}><IconSettings size={18} /></ActionIcon><Button size="xs" color="red" variant="subtle" onClick={() => navigate("/games")}>退出</Button></Group>
             </Group>
             <Box className="game-phase-track">{GAME_PHASES.map((item, index) => <button key={item.id} disabled={(index === 0 && roleConfirmed) || Boolean(streaming?.active)} className={`${index < phaseIndex ? "game-phase-step is-complete" : index === phaseIndex ? "game-phase-step is-active" : "game-phase-step"}${index === 0 && roleConfirmed ? " is-locked" : ""}`} onClick={() => goToPhase(index)}><span>{index < phaseIndex ? "✓" : index + 1}</span><Text size="xs">{item.shortLabel}</Text></button>)}</Box>
           </header>
@@ -2892,7 +2924,20 @@ function GamePage() {
               <Group justify="space-between">
                 <Group gap="xs">
                   <Badge variant="light">字幕：开启</Badge>
-                  <Badge variant="light">音效：70%</Badge>
+                  <Badge variant="light" color={bgmPlaying ? "teal" : "gray"}>BGM：{bgmPlaying ? "播放中" : "已暂停"}</Badge>
+                  <Box style={{ width: 120 }}>
+                    <Slider
+                      size="xs"
+                      color="teal"
+                      min={0}
+                      max={1}
+                      step={0.1}
+                      value={bgmVolume}
+                      onChange={setBgmVolume}
+                      label={null}
+                      marks={[{ value: 0, label: "0%" }, { value: 0.4, label: "40%" }, { value: 1, label: "100%" }]}
+                    />
+                  </Box>
                   <Badge variant="light">Agent 节奏：适中</Badge>
                 </Group>
                 <Text size="sm" c="dimmed">演示设置仅保存在当前页面状态。</Text>

@@ -1131,6 +1131,40 @@ a {
 }
 
 /* ============================
+   复盘页 — 基因胶囊卡片
+   ============================ */
+
+.evolution-card {
+  overflow: hidden;
+  border: 1px solid rgba(251, 191, 36, 0.12);
+  background: linear-gradient(165deg, rgba(28, 18, 18, 0.95) 0%, rgba(12, 8, 8, 0.98) 100%);
+}
+
+.evolution-card__header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.evolution-card__gene {
+  border-left: 2px solid rgba(174, 110, 255, 0.55);
+  margin-left: 16px;
+}
+
+.evolution-card__arrow {
+  display: flex;
+  justify-content: center;
+  color: #fbbf24;
+}
+
+.evolution-card__capsule {
+  border-top: 1px solid rgba(251, 191, 36, 0.14);
+  transition: background 0.2s ease;
+}
+
+.evolution-card__capsule:hover {
+  background: rgba(251, 191, 36, 0.06);
+}
+
+/* ============================
    Agent 广场 — 圆桌视角
    ============================ */
 

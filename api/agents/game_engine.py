@@ -355,6 +355,10 @@ class GameEngine:
             if agent.role.value == "assistant":
                 continue  # 个人助手不参与游戏
 
+            from api.agents.agent_persona_service import ensure_persona_loaded_for_agent
+            if agent.role.value == "companion":
+                ensure_persona_loaded_for_agent(agent)
+
             state = AgentGameState(agent_key=key, session_id=game_id)
             state.constitution = agent.constitution  # 已被胶囊注入过
             state.global_story = global_story
@@ -485,6 +489,9 @@ class GameEngine:
             agent = orchestrator.agents[agent_key]
             if agent.role.value == "assistant":
                 continue
+
+            from api.agents.agent_persona_service import ensure_persona_loaded_for_agent
+            ensure_persona_loaded_for_agent(agent)
 
             old_state = game_state["agents"].get(agent_key)
             state = AgentGameState(agent_key=agent_key, session_id=game_id)
@@ -717,6 +724,29 @@ class GameEngine:
                     "dm_review": game_session.result.get("dm_review") if game_session.result else None,
                     "agents": {},
                 }
+                try:
+                    agent_states = db_session.query(AgentGameStateModel).filter(
+                        AgentGameStateModel.session_id == game_id
+                    ).all()
+                    for ast in agent_states:
+                        state = AgentGameState.from_db_dict({
+                            "agent_key": ast.agent_key,
+                            "session_id": ast.session_id,
+                            "character_json": ast.character_json or {},
+                            "constitution": ast.constitution or "",
+                            "all_actors_json": ast.all_actors_json or [],
+                            "global_story": ast.global_story or "",
+                            "chat_history_json": ast.chat_history_json or [],
+                            "compressed_summary": ast.compressed_summary or "",
+                            "key_facts_json": ast.key_facts_json or [],
+                            "discovered_evidences_json": ast.discovered_evidences_json or [],
+                            "intents_json": ast.intents_json or {},
+                            "observation_buffer_json": ast.observation_buffer_json or [],
+                            "loaded_capsule_ids_json": ast.loaded_capsule_ids_json or [],
+                        })
+                        game_state["agents"][ast.agent_key] = state
+                except Exception:
+                    pass
                 self._games[game_id] = game_state
                 return game_state
         finally:
@@ -1702,18 +1732,31 @@ class GameEngine:
                 db_session.close()
 
     def _trigger_capsule_generation(self, game_id: str, script_id: str) -> None:
-        """进入复盘阶段时触发完整自进化流水线。"""
+        """进入复盘阶段时触发完整自进化流水线（后台线程，避免阻塞阶段切换）。"""
+        import threading
+
         try:
-            from api.capsules.dm_evolution_service import run_full_evolution_pipeline
-            result = run_full_evolution_pipeline(game_id)
-            summary = result.get("evolution_summary", {})
-            logger.info(
-                f"复盘自进化完成: game={game_id}, "
-                f"genes={summary.get('genes_created', 0)}, "
-                f"capsules={summary.get('capsules_created', 0)}"
+            from api.capsules.dm_evolution_service import (
+                mark_review_generating,
+                run_full_evolution_pipeline,
             )
+            mark_review_generating(game_id)
+
+            def _run() -> None:
+                try:
+                    result = run_full_evolution_pipeline(game_id)
+                    summary = result.get("evolution_summary", {})
+                    logger.info(
+                        f"复盘自进化完成: game={game_id}, "
+                        f"genes={summary.get('genes_created', 0)}, "
+                        f"capsules={summary.get('capsules_created', 0)}"
+                    )
+                except Exception as e:
+                    logger.error(f"复盘自进化失败: {e}")
+
+            threading.Thread(target=_run, daemon=True, name=f"review-{game_id[:12]}").start()
         except Exception as e:
-            logger.error(f"复盘自进化失败: {e}")
+            logger.error(f"启动复盘自进化线程失败: {e}")
 
     def _auto_post_game_reveal(self, game_id: str) -> dict:
         """从 VOTING 进入 REVEAL 时自动触发后剧情生成。

@@ -10,6 +10,8 @@ from api.agents.game_engine import game_engine, GamePhase, PHASE_CONFIG
 
 logger = logging.getLogger(__name__)
 
+PERSONA_CONSTITUTION_MARKER = "## 你的身份："
+
 
 # 两轮公共发言的专用阶段指引（前端 speech_phase 传入 intro / discussion）
 PUBLIC_SPEECH_PROMPTS = {
@@ -123,3 +125,89 @@ def build_game_context_prompt(
         parts.append("【已公开证物（全场可见）】\n" + "\n".join(pub_lines))
 
     return "\n\n".join(parts)
+
+
+def resolve_invoke_system_prompt(
+    session_id: str | None,
+    actor_name: str,
+    role_type: str = "companion",
+) -> tuple[str, str]:
+    """构建 invoke 用的 system prompt，并返回 Agent 显示名（如「月蛾」）。
+
+    优先使用 agent_game_state.constitution（含人设库 + 胶囊），
+    否则从 orchestrator Agent 加载人设后回退到通用模板。
+    """
+    from api.llm.llm_service import ROLE_SYSTEM_PROMPTS
+    from api.orchestrator import orchestrator
+    from api.agents.agent_persona_service import ensure_persona_loaded_for_agent
+
+    base = ROLE_SYSTEM_PROMPTS.get(role_type, ROLE_SYSTEM_PROMPTS["companion"])
+    constitution = ""
+    agent_display_name = ""
+
+    if session_id:
+        game = game_engine.get_game(session_id)
+        if game:
+            agent_key = find_agent_key(game, actor_name)
+            if agent_key:
+                state = game.get("agents", {}).get(agent_key)
+                if state and getattr(state, "constitution", ""):
+                    constitution = state.constitution
+                agent = orchestrator.agents.get(agent_key)
+                if agent:
+                    agent_display_name = agent.name
+                    ensure_persona_loaded_for_agent(agent)
+                    if state and agent.constitution and agent.constitution != constitution:
+                        state.constitution = agent.constitution
+                        constitution = agent.constitution
+                    elif not constitution:
+                        constitution = agent.constitution or ""
+
+    if constitution:
+        system_prompt = f"{constitution}\n\n---\n{base}"
+    else:
+        system_prompt = base
+
+    if agent_display_name:
+        system_prompt += (
+            f"\n\n【陪玩 Agent 名称】{agent_display_name}"
+            f"（玩家私聊或喊话时可能用这个名称称呼你；"
+            f"你就是 {agent_display_name}，不要以第三人称谈论自己。）"
+        )
+
+    return system_prompt, agent_display_name
+
+
+def build_invoke_system_prompt(
+    session_id: str | None,
+    actor_name: str,
+    role_type: str,
+    bio: str,
+    personality: str,
+    secret: str,
+    violation: str,
+    speech_phase: str | None = None,
+) -> str:
+    """完整的 invoke system prompt：Agent 人设 + 剧本角色 + 游戏上下文。"""
+    system_prompt, _agent_name = resolve_invoke_system_prompt(
+        session_id, actor_name, role_type
+    )
+
+    system_prompt += (
+        f"\n\n【本局剧本角色】{actor_name}\n"
+        f"角色简介：{bio}\n性格：{personality}"
+    )
+
+    if secret:
+        system_prompt += f"\n角色秘密（仅你自己知道）：{secret}"
+    if violation:
+        system_prompt += f"\n行为限制（绝不能违反）：{violation}"
+
+    if session_id:
+        game_context = build_game_context_prompt(
+            session_id, actor_name, speech_phase
+        )
+        if game_context:
+            system_prompt += f"\n\n---\n{game_context}"
+
+    return system_prompt

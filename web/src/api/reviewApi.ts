@@ -42,17 +42,37 @@ export interface TruthReview {
   vote_analysis?: string;
 }
 
+export interface ReviewGene {
+  id?: string;
+  gene_id?: string;
+  agent_key?: string;
+  agent_name?: string;
+  summary?: string;
+  detail?: string;
+  category?: string;
+  score?: number;
+  dmScore?: number;
+  dmComment?: string;
+  dmSuggestions?: string;
+  capsuleId?: string;
+}
+
 export interface ReviewCapsule {
   id: string;
   title: string;
   category?: string;
   publisherRole?: string;
+  agent_key?: string;
+  agent_name?: string;
   score?: number;
   content?: string;
   strategy?: string;
   signals?: string[];
   usageCount?: number;
   createdAt?: string;
+  stored_in_db?: boolean;
+  reviewStatus?: string;
+  geneId?: string;
 }
 
 export interface GameReviewBundle {
@@ -64,10 +84,11 @@ export interface GameReviewBundle {
   character_scores?: CharacterScore[];
   score_dimensions?: Array<{ key: string; label: string; description: string }>;
   capsules?: ReviewCapsule[];
-  genes?: Array<Record<string, unknown>>;
+  genes?: ReviewGene[];
   evolution_summary?: {
     genes_created?: number;
     capsules_created?: number;
+    capsules_stored?: number;
     errors?: string[];
   };
   message?: string;

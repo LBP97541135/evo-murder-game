@@ -34,3 +34,19 @@ export function mergePublicEvidenceRecords(
   if (current.some((item) => item.id === incoming.id)) return current;
   return [...current, incoming];
 }
+
+export function publicEventsToEvidenceRecords(
+  events: Array<{ type: string; evidence?: { id: string; name: string; description: string }; speaker?: string; reason?: string; aiResponse?: string; targetName?: string }>,
+): PublicEvidenceRecord[] {
+  return events
+    .filter((event) => event.type === "evidence" && event.evidence && (event.targetName === "所有人" || !event.targetName))
+    .map((event) => ({
+      id: event.evidence!.id,
+      name: event.evidence!.name,
+      description: event.evidence!.description,
+      presented_by: (event.speaker || "").split(" · ")[0] || event.speaker || "未知",
+      reason: event.reason,
+      ai_response: event.aiResponse,
+      presented_at: new Date().toISOString(),
+    }));
+}

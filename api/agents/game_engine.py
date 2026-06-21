@@ -241,6 +241,9 @@ class GameEngine:
                     "public_evidences": gs.result.get("public_evidences", []) if gs.result else [],
                     "role_evidences": gs.result.get("role_evidences", {}) if gs.result else {},
                     "player_character_name": gs.result.get("player_character_name", "") if gs.result else "",
+                    "cast": gs.result.get("cast", []) if gs.result else [],
+                    "reveal_data": gs.result.get("reveal_data") if gs.result else None,
+                    "dm_review": gs.result.get("dm_review") if gs.result else None,
                     "agents": {},
                 }
                 # 恢复每个 Agent 的状态（表可能不存在于旧数据库，捕捉异常）
@@ -709,6 +712,9 @@ class GameEngine:
                     "public_evidences": game_session.result.get("public_evidences", []) if game_session.result else [],
                     "role_evidences": game_session.result.get("role_evidences", {}) if game_session.result else {},
                     "player_character_name": game_session.result.get("player_character_name", "") if game_session.result else "",
+                    "cast": game_session.result.get("cast", []) if game_session.result else [],
+                    "reveal_data": game_session.result.get("reveal_data") if game_session.result else None,
+                    "dm_review": game_session.result.get("dm_review") if game_session.result else None,
                     "agents": {},
                 }
                 self._games[game_id] = game_state
@@ -1632,6 +1638,8 @@ class GameEngine:
                 "player_character_name": game_state.get("player_character_name", ""),
                 "cast": game_state.get("cast", []),
                 "frontend_phase_index": game_state.get("frontend_phase_index"),
+                "reveal_data": game_state.get("reveal_data"),
+                "dm_review": game_state.get("dm_review"),
             }
 
             if game_state.get("ended_at"):

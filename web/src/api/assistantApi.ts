@@ -64,6 +64,35 @@ export const getAssistantGreeting = (userId = "user_default") =>
     persona: { key: string; name: string; personaText: string; speechStyle: string };
   }>(`/users/assistant/greeting?user_id=${userId}`);
 
+export function extractAgentStatePayload(
+  response: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  if (!response) return {};
+  if (response.state && typeof response.state === "object") {
+    return response.state as Record<string, unknown>;
+  }
+  return response;
+}
+
+export function matchEvidenceInPool<T extends { id: string; name: string; description?: string }>(
+  pool: T[],
+  evidenceName: string,
+): T | undefined {
+  const target = evidenceName.trim().replace(/[「」"'【】]/g, "");
+  if (!target) return undefined;
+  const exact = pool.find((item) => item.name === target);
+  if (exact) return exact;
+  const partial = pool.find(
+    (item) => item.name.includes(target) || target.includes(item.name),
+  );
+  if (partial) return partial;
+  const normalized = (value: string) => value.replace(/\s+/g, "").toLowerCase();
+  const targetNorm = normalized(target);
+  return pool.find((item) => {
+    const nameNorm = normalized(item.name);
+    return nameNorm.includes(targetNorm) || targetNorm.includes(nameNorm);
+  });
+}
 const EVIDENCE_MARKER_RE = /\[出示证物:([^|\]]+)(?:\|([^\]]*))?\]/;
 const CALLOUT_MARKER_RE = /\[喊话:([^|\]]+)(?:\|([^\]]*))?\]/;
 

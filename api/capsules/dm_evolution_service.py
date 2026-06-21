@@ -146,10 +146,28 @@ def _gather_session_context(session_id: str) -> dict:
     if player_role and not any(p["role_name"] == player_role for p in participants):
         participants.append({"role_name": player_role, "agent_key": "user", "type": "human"})
 
+    from api.orchestrator import orchestrator
+
     for _key, state in game.get("agents", {}).items():
+        agent = orchestrator.agents.get(_key)
+        if agent and agent.role.value == "dm":
+            continue
         rn = (state.character or {}).get("name", "")
         if rn and not any(p["role_name"] == rn for p in participants):
             participants.append({"role_name": rn, "agent_key": _key, "type": "agent"})
+
+    def _is_review_participant(p: dict) -> bool:
+        role_name = p.get("role_name", "")
+        if role_name in ("侦探", "DM", "雾港主理人"):
+            return False
+        agent_key = p.get("agent_key", "")
+        if agent_key and agent_key not in ("user", ""):
+            agent = orchestrator.agents.get(agent_key)
+            if agent and agent.role.value == "dm":
+                return False
+        return bool(role_name)
+
+    participants = [p for p in participants if _is_review_participant(p)]
 
     return {
         "session_id": session_id,
@@ -160,7 +178,7 @@ def _gather_session_context(session_id: str) -> dict:
         "reveal_data": reveal,
         "discussion_summary": "\n".join(speech_lines[-40:]) or "（本局公共讨论记录较少）",
         "speech_by_role": speech_by_role,
-        "participants": [p for p in participants if p["role_name"] and p["role_name"] not in ("侦探", "DM")],
+        "participants": participants,
         "chat_count": game.get("chat_count", 0),
     }
 
@@ -379,10 +397,47 @@ def _agent_self_reflect_gene(
     )
 
 
-def _ensure_capsule_for_gene(gene_id: str, min_composite: float = CAPSULE_SCORE_THRESHOLD) -> dict:
-    """DM 评审 Gene 并尽量生成胶囊；评分不足时微调 dm_score 以保证入库（每 Agent 至少一条）。"""
+def _session_companion_agent_keys(game: dict) -> list[str]:
+    """本局参与复盘自进化的 Agent：仅陪玩 companion，不含 DM。"""
+    from api.orchestrator import orchestrator
+
+    keys: list[str] = []
+    for entry in game.get("cast") or []:
+        if entry.get("type") != "agent":
+            continue
+        agent_key = entry.get("agentKey") or entry.get("agent_key")
+        if not agent_key:
+            continue
+        agent = orchestrator.agents.get(agent_key)
+        if not agent or not agent.registered or agent.role.value == "dm":
+            continue
+        if agent_key not in keys:
+            keys.append(agent_key)
+
+    if keys:
+        return keys
+
+    return [
+        k for k, a in orchestrator.agents.items()
+        if a.registered and a.role.value == "companion"
+    ]
+
+
+def _build_capsule_display_for_gene(
+    gene_id: str,
+    agent_key: str,
+    agent_name: str,
+    min_composite: float = CAPSULE_SCORE_THRESHOLD,
+) -> dict:
+    """DM 评审 Gene 并生成胶囊；无论是否入库都返回可展示结构。"""
     from api.db.models import get_session, GeneRecord
-    from api.capsules.capsule_service import dm_review_gene, generate_capsule_from_gene
+    from api.capsules.capsule_service import (
+        dm_review_gene,
+        generate_capsule_from_gene,
+        get_capsule,
+        get_gene,
+        _extract_capsule_content,
+    )
 
     review = dm_review_gene(gene_id)
     if "error" in review:
@@ -390,12 +445,12 @@ def _ensure_capsule_for_gene(gene_id: str, min_composite: float = CAPSULE_SCORE_
 
     db = get_session()
     try:
-        gene = db.query(GeneRecord).filter(GeneRecord.id == gene_id).first()
-        if not gene:
+        gene_row = db.query(GeneRecord).filter(GeneRecord.id == gene_id).first()
+        if not gene_row:
             return {"error": "gene_not_found"}
-        composite = gene.score * 0.3 + (gene.dm_score or 0) * 0.7
+        composite = gene_row.score * 0.3 + (gene_row.dm_score or 0) * 0.7
         if composite < min_composite:
-            gene.dm_score = max(gene.dm_score or 0, min_composite)
+            gene_row.dm_score = max(gene_row.dm_score or 0, min_composite)
             db.commit()
     finally:
         db.close()
@@ -404,67 +459,111 @@ def _ensure_capsule_for_gene(gene_id: str, min_composite: float = CAPSULE_SCORE_
     if cap.get("error") == "score_too_low":
         db = get_session()
         try:
-            gene = db.query(GeneRecord).filter(GeneRecord.id == gene_id).first()
-            if gene:
-                gene.dm_score = 0.85
+            gene_row = db.query(GeneRecord).filter(GeneRecord.id == gene_id).first()
+            if gene_row:
+                gene_row.dm_score = 0.85
                 db.commit()
         finally:
             db.close()
         cap = generate_capsule_from_gene(gene_id)
-    return cap
+
+    if cap.get("success") and cap.get("capsule_id"):
+        stored = get_capsule(cap["capsule_id"]) or {}
+        return {
+            **stored,
+            "agent_key": agent_key,
+            "agent_name": agent_name,
+            "geneId": gene_id,
+            "stored_in_db": True,
+            "dm_review": review,
+        }
+
+    gene = get_gene(gene_id)
+    if not gene:
+        return {"error": "gene_not_found"}
+
+    db = get_session()
+    try:
+        gene_row = db.query(GeneRecord).filter(GeneRecord.id == gene_id).first()
+        if not gene_row:
+            return {"error": "gene_not_found"}
+        content = _extract_capsule_content(gene_row, "companion")
+        composite = gene_row.score * 0.3 + (gene_row.dm_score or 0) * 0.7
+    finally:
+        db.close()
+
+    return {
+        "id": f"preview_{gene_id}",
+        "geneId": gene_id,
+        "agent_key": agent_key,
+        "agent_name": agent_name,
+        "title": content.get("title") or f"{agent_name} 本局经验胶囊",
+        "category": gene.get("category"),
+        "content": content.get("content") or gene.get("summary") or "",
+        "strategy": content.get("strategy") or gene.get("dmSuggestions") or "",
+        "examples": content.get("examples") or "",
+        "antiPatterns": content.get("anti_patterns") or "",
+        "score": composite,
+        "stored_in_db": False,
+        "reviewStatus": "preview",
+        "dm_review": review,
+    }
 
 
 def run_full_evolution_pipeline(session_id: str) -> dict:
-    """完整复盘自进化流水线。"""
+    """完整复盘自进化流水线（评分含玩家+陪玩 Agent；基因/胶囊仅陪玩 Agent）。"""
     from api.agents.game_engine import game_engine
     from api.orchestrator import orchestrator
-    from api.capsules.capsule_service import list_genes, list_capsules
+    from api.capsules.capsule_service import get_gene
 
     ctx = _gather_session_context(session_id)
+    game = game_engine.get_game(session_id) or {}
 
     truth_review = dm_generate_truth_review(session_id, ctx)
     character_scores = dm_score_characters_parallel(session_id, ctx)
-
-    score_by_role = {s["role_name"]: s for s in character_scores}
-    score_by_key: dict[str, dict] = {}
-    for s in character_scores:
-        if s.get("agent_key"):
-            score_by_key[s["agent_key"]] = s
 
     genes: list[dict] = []
     capsules: list[dict] = []
     errors: list[str] = []
 
-    agent_keys = [
-        k for k, a in orchestrator.agents.items()
-        if a.registered and a.role.value in ("companion", "dm")
-    ]
+    agent_keys = _session_companion_agent_keys(game)
 
     for agent_key in agent_keys:
-        agent = orchestrator.agents[agent_key]
+        agent = orchestrator.agents.get(agent_key)
+        if not agent:
+            errors.append(f"{agent_key}: agent_not_found")
+            continue
+
         char_score = None
+        role_name = None
+        for entry in game.get("cast") or []:
+            if (entry.get("agentKey") or entry.get("agent_key")) == agent_key:
+                role_name = entry.get("role")
+                break
         for s in character_scores:
             if s.get("agent_key") == agent_key:
                 char_score = s
                 break
-        if not char_score and agent.role.value == "dm":
-            char_score = {
-                "compositeScore": 80,
-                "dmComment": "DM 本局控场与复盘已完成。",
-                "dimensions": {d["key"]: 80 for d in SCORE_DIMENSIONS},
-            }
+            if role_name and s.get("role_name") == role_name:
+                char_score = s
+                break
 
         gene_result = _agent_self_reflect_gene(session_id, agent_key, char_score, ctx)
         if "error" in gene_result:
             errors.append(f"{agent_key}: {gene_result['error']}")
             continue
-        genes.append(gene_result)
 
-        cap_result = _ensure_capsule_for_gene(gene_result["gene_id"])
-        if cap_result.get("success"):
+        gene_id = gene_result["gene_id"]
+        gene_full = get_gene(gene_id) or {"gene_id": gene_id, **gene_result}
+        gene_full["agent_key"] = agent_key
+        gene_full["agent_name"] = agent.name
+        genes.append(gene_full)
+
+        cap_result = _build_capsule_display_for_gene(gene_id, agent_key, agent.name)
+        if cap_result.get("id") or cap_result.get("title"):
             capsules.append(cap_result)
         elif "error" in cap_result:
-            errors.append(f"Gene {gene_result['gene_id']}: {cap_result.get('error')}")
+            errors.append(f"Gene {gene_id}: {cap_result.get('error')}")
 
     review_bundle = {
         "session_id": session_id,
@@ -474,14 +573,12 @@ def run_full_evolution_pipeline(session_id: str) -> dict:
         "truth_review": truth_review,
         "character_scores": character_scores,
         "score_dimensions": SCORE_DIMENSIONS,
-        "genes": list_genes(session_id=session_id),
-        "capsules": [
-            c for c in list_capsules(review_status="approved", limit=200)
-            if c.get("geneId") and any(g.get("gene_id") == c.get("geneId") for g in genes)
-        ],
+        "genes": genes,
+        "capsules": capsules,
         "evolution_summary": {
             "genes_created": len(genes),
             "capsules_created": len(capsules),
+            "capsules_stored": sum(1 for c in capsules if c.get("stored_in_db")),
             "errors": errors,
         },
         "generated_at": datetime.now(timezone.utc).isoformat(),

@@ -95,6 +95,8 @@ import {
   parseAgentSpeechActions,
   forceAgentAnswer,
   invokeAIStreamWithPhase,
+  extractAgentStatePayload,
+  matchEvidenceInPool,
 } from "../api/assistantApi";
 import { roleEvidenceItemsToGameEvidence } from "../utils/roleEvidence";
 import {
@@ -646,7 +648,6 @@ function GamePage() {
         }
       })
       .catch(() => undefined);
-    // 加载剧本证物池（初始证物 + 搜证池）
     const dbScriptId = id;
     getEvidencePool(dbScriptId)
       .then((result) => {
@@ -746,6 +747,34 @@ function GamePage() {
     }));
   };
 
+  const refreshPublicEvidenceFromBackend = async () => {
+    if (!sessionId) return;
+    try {
+      const result = await getPublicEvidences(sessionId);
+      if (result.public_evidences?.length) {
+        setPublicEvidence(result.public_evidences as PublicEvidenceRecord[]);
+      }
+    } catch {
+      // 非致命：本地 state 仍可用
+    }
+  };
+
+  const resolveAgentEvidencePool = async (
+    agentPlayer: (typeof dynamicPlayers)[number],
+  ): Promise<Array<{ id: string; name: string; description: string }>> => {
+    if (!sessionId) return [];
+    const response = await getAgentState(sessionId, resolveAgentKey(agentPlayer.id));
+    const inner = extractAgentStatePayload(response);
+    const fromState = (inner.discovered_evidences || inner.discoveredEvidences || []) as Array<{
+      id: string;
+      name: string;
+      description: string;
+    }>;
+    if (fromState.length > 0) return fromState;
+    const roles = await getRoleEvidences(sessionId);
+    return roles.role_evidences?.[agentPlayer.role] || [];
+  };
+
   const getPublicSpeakerLabel = () => {
     const self = playerById("user");
     if (!self || self.role === "侦探") return "林晓青";
@@ -802,9 +831,8 @@ function GamePage() {
   ): Promise<Evidence | null> => {
     if (!sessionId) return null;
     try {
-      const state = await getAgentState(sessionId, resolveAgentKey(agentPlayer.id));
-      const pool = (state?.discovered_evidences || []) as Array<{ id: string; name: string; description: string }>;
-      const matched = pool.find((item) => item.name === evidenceName || item.name.includes(evidenceName));
+      const pool = await resolveAgentEvidencePool(agentPlayer);
+      const matched = matchEvidenceInPool(pool, evidenceName);
       if (!matched) {
         showFeedback(`${agentPlayer.role} 试图出示「${evidenceName}」，但未持有该证物。`);
         return null;
@@ -830,6 +858,7 @@ function GamePage() {
         targetName: "所有人",
       });
       appendPublicEvidence(gameEv, agentPlayer.role, reason, result.aiResponse);
+      void refreshPublicEvidenceFromBackend();
       showFeedback(`${agentPlayer.role} 公开出示了「${matched.name}」。`);
       return gameEv;
     } catch (error) {
@@ -1375,8 +1404,9 @@ function GamePage() {
     void (async () => {
       let heldEvidences: Array<{ name: string; description: string }> = [];
       try {
-        const state = await getAgentState(sessionId, resolveAgentKey(speakerId));
-        heldEvidences = (state?.discovered_evidences || state?.discoveredEvidences || []) as Array<{
+        const response = await getAgentState(sessionId, resolveAgentKey(speakerId));
+        const inner = extractAgentStatePayload(response);
+        heldEvidences = (inner.discovered_evidences || inner.discoveredEvidences || []) as Array<{
           name: string;
           description: string;
         }>;
@@ -1638,6 +1668,7 @@ function GamePage() {
       });
       if (evidenceVisibility === "所有人") {
         appendPublicEvidence(item, speakerLabel, reason, result.aiResponse);
+        void refreshPublicEvidenceFromBackend();
       }
       setDialog(null);
       setEvidenceReason("");

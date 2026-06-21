@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700;900&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&family=JetBrains+Mono:wght@400;500&display=swap");
+
 html,
 body,
 #root {
@@ -706,10 +708,8 @@ a {
 
 .game-casting-template-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px;
-  max-height: 320px;
-  overflow-y: auto;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
 }
 
 .game-reading-card,
@@ -732,6 +732,7 @@ a {
   background: rgba(250, 176, 5, 0.42);
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
+  cursor: pointer;
 }
 
 .game-script-modal-chapter {
@@ -1136,8 +1137,8 @@ a {
 
 .round-table {
   position: relative;
-  width: 300px;
-  height: 300px;
+  width: 360px;
+  height: 360px;
   max-width: 100%;
   aspect-ratio: 1 / 1;
 }
@@ -1235,8 +1236,8 @@ a {
 
 @media (max-width: 48em) {
   .round-table {
-    width: 240px;
-    height: 240px;
+    width: 280px;
+    height: 280px;
   }
 
   .game-casting-picker {

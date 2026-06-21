@@ -122,18 +122,6 @@ function ScriptDetailPage() {
                     <Badge key={agent} size="lg" color="red" variant="light">{agent}</Badge>
                   ))}
                 </Group>
-                <Button
-                  size="xl"
-                  radius="xl"
-                  color="red"
-                  mt="xl"
-                  fullWidth
-                  onClick={() => navigate(`/play/${id}`)}
-                  leftSection={<IconRobot size={20} />}
-                  className="industrial-button"
-                >
-                  进入游戏圆桌
-                </Button>
               </Paper>
             </Stack>
           </Grid.Col>

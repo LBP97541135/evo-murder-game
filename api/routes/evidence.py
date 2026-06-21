@@ -15,7 +15,6 @@ from pydantic import BaseModel
 
 from api.db.models import (
     get_session,
-    Script, ScriptEvidence,
     EvidenceRecord, EvidenceReactionRecord, EvidenceDiscoveryRecord,
     EvidencePresentationRecord, EvidenceCombinationRecord, GameProgressRecord,
     evidence_record_to_dict, dict_to_evidence_record,
@@ -24,8 +23,6 @@ from api.db.models import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-PUBLIC_PRESENT_TARGETS = {"公开", "所有人", "all", "public"}
 
 
 # ============================
@@ -41,14 +38,6 @@ class EvidenceCreateRequest(BaseModel):
     importance: str = "medium"
     relatedActors: List[str] = []
     discoveredBy: str = "system"
-    id: Optional[str] = None
-
-
-class EvidenceDiscoverRequest(BaseModel):
-    scriptId: str
-    sessionId: str
-    scriptEvidenceId: str
-    discoveredBy: str = "player"
 
 
 class EvidenceUpdateRequest(BaseModel):
@@ -132,18 +121,7 @@ async def create_evidence(req: EvidenceCreateRequest):
     """创建新证物并记录发现历史。"""
     session = get_session()
     try:
-        evidence_id = req.id or f"evidence_{uuid.uuid4().hex[:8]}"
-
-        existing = session.query(EvidenceRecord).filter(
-            EvidenceRecord.id == evidence_id,
-            EvidenceRecord.session_id == req.sessionId,
-        ).first()
-        if existing:
-            return {
-                "success": True,
-                "evidence": evidence_record_to_dict(existing),
-                "message": "证物已存在",
-            }
+        evidence_id = f"evidence_{uuid.uuid4().hex[:8]}"
 
         evidence = EvidenceRecord(
             id=evidence_id,
@@ -166,7 +144,7 @@ async def create_evidence(req: EvidenceCreateRequest):
             evidence_id=evidence_id,
             session_id=req.sessionId,
             actor_name=req.discoveredBy,
-            discovery_method="investigation",
+            discovery_method="system",
             previous_state="hidden",
             new_state="surface",
         )
@@ -186,81 +164,6 @@ async def create_evidence(req: EvidenceCreateRequest):
     except Exception as e:
         session.rollback()
         raise HTTPException(status_code=500, detail=f"创建证物失败: {str(e)}")
-    finally:
-        session.close()
-
-
-@router.post("/discover")
-async def discover_script_evidence(req: EvidenceDiscoverRequest):
-    """从剧本证物池中发现一条证物（搜证阶段）。"""
-    session = get_session()
-    try:
-        template = session.query(ScriptEvidence).filter(
-            ScriptEvidence.id == req.scriptEvidenceId,
-            ScriptEvidence.script_id == req.scriptId,
-        ).first()
-        if not template:
-            raise HTTPException(status_code=404, detail="剧本证物不存在")
-
-        existing = session.query(EvidenceRecord).filter(
-            EvidenceRecord.id == req.scriptEvidenceId,
-            EvidenceRecord.session_id == req.sessionId,
-        ).first()
-        if existing:
-            return {
-                "success": True,
-                "evidence": evidence_record_to_dict(existing),
-                "message": "证物已发现",
-            }
-
-        related = template.related_characters
-        if isinstance(related, str):
-            import json as _json
-            try:
-                related = _json.loads(related)
-            except Exception:
-                related = []
-
-        evidence = EvidenceRecord(
-            id=template.id,
-            script_id=req.scriptId,
-            session_id=req.sessionId,
-            name=template.name,
-            basic_description=template.description or "",
-            category=template.category or "physical",
-            importance=template.importance or "medium",
-            related_actors=related or [],
-            discovery_state="surface",
-            unlock_level=1,
-            is_new=True,
-            discovered_at=datetime.now(timezone.utc),
-        )
-        session.add(evidence)
-
-        discovery = EvidenceDiscoveryRecord(
-            evidence_id=template.id,
-            session_id=req.sessionId,
-            actor_name=req.discoveredBy,
-            discovery_method="investigation",
-            previous_state="hidden",
-            new_state="surface",
-        )
-        session.add(discovery)
-        _update_progress(session, req.sessionId, req.scriptId, discovered=template.id)
-
-        session.commit()
-        session.refresh(evidence)
-
-        return {
-            "success": True,
-            "evidence": evidence_record_to_dict(evidence),
-            "message": "搜证成功",
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        session.rollback()
-        raise HTTPException(status_code=500, detail=f"搜证失败: {str(e)}")
     finally:
         session.close()
 
@@ -357,53 +260,24 @@ async def present_evidence(req: EvidencePresentationRequest):
             ai_response = reaction.basic_response
             new_evidences = reaction.breakthrough.get("unlock_evidences", []) if reaction.breakthrough else []
             updated_info = reaction.breakthrough.get("updated_info", []) if reaction.breakthrough else []
-        elif req.presentedTo in PUBLIC_PRESENT_TARGETS:
-            reaction_type = "public"
-            reason = (req.textContent or "").strip()
-            try:
-                from api.llm.llm_service import respond_initial
-
-                llm_prompt = (
-                    f"你是剧本杀 DM 主持人。玩家向全体公开出示了证物【{evidence.name}】。\n"
-                    f"证物描述：{evidence.basic_description or '无'}\n"
-                    f"详细描述：{evidence.detailed_description or evidence.deep_description or '无'}\n"
-                )
-                if reason:
-                    llm_prompt += f"玩家出示理由：{reason}\n"
-                llm_prompt += (
-                    "\n请用 80-120 字描述：\n"
-                    "1. 在场众人看到证物后的整体反应\n"
-                    "2. 这条证物对当前讨论可能产生什么影响\n"
-                    "语气庄重、客观，不要直接泄露凶手身份。"
-                )
-                ai_response = respond_initial(
-                    system_prompt="你是专业剧本杀 DM，擅长描述公开出示证物后众人的反应。",
-                    user_message=llm_prompt,
-                    temperature=0.7,
-                    max_tokens=300,
-                )
-            except Exception as llm_err:
-                logger.warning(f"公开证物反应生成失败: {llm_err}")
-                ai_response = (
-                    f"（{evidence.name}被公开出示，在场众人的目光都集中在这份证物上，"
-                    "讨论的气氛明显紧张了起来。）"
-                )
         else:
             # 无预设反应 → 使用 LLM 动态生成角色反应
             reaction_type = "llm_generated"
             try:
                 from api.llm.llm_service import respond_initial
-                from api.agents.game_engine import game_engine
-                from api.agents.game_context import find_agent_key
 
+                # 获取被出示角色的游戏状态（从 game_engine）
+                from api.agents.game_engine import game_engine
                 agent_state = None
                 if evidence.session_id:
                     game = game_engine.get_game(evidence.session_id)
                     if game:
-                        agent_key = find_agent_key(game, req.presentedTo)
-                        if agent_key:
-                            agent_state = game.get("agents", {}).get(agent_key)
+                        for key, state in game.get("agents", {}).items():
+                            if state.character.get("name", "") == req.presentedTo:
+                                agent_state = state
+                                break
 
+                # 构建角色上下文
                 character_context = ""
                 if agent_state:
                     ch = agent_state.character
@@ -416,22 +290,17 @@ async def present_evidence(req: EvidencePresentationRequest):
                 else:
                     character_context = f"角色名：{req.presentedTo}\n"
 
-                reason = (req.textContent or "").strip()
                 llm_prompt = (
                     f"你正在扮演一个剧本杀角色。以下是你的角色信息：\n"
                     f"{character_context}\n"
                     f"玩家向你出示了【{evidence.name}】。\n"
                     f"证物描述：{evidence.basic_description or '无'}\n"
-                    f"详细描述：{evidence.detailed_description or evidence.deep_description or '无'}\n"
-                )
-                if reason:
-                    llm_prompt += f"玩家出示理由：{reason}\n"
-                llm_prompt += (
-                    "\n请以角色的身份，用第一人称对出示的证物做出自然反应（50-100字）：\n"
-                    "1. 你认识这个证物吗？\n"
-                    "2. 你对此有什么反应？（惊讶/回避/承认/混淆等）\n"
-                    "3. 你说出的话是否隐瞒了什么？\n"
-                    "语气要贴合角色性格。注意：如果证物对角色不利，你可能会狡辩或转移话题。"
+                    f"详细描述：{evidence.detailed_description or evidence.deep_description or '无'}\n\n"
+                    f"请以角色的身份，用第一人称对出示的证物做出自然反应（50-100字）：\n"
+                    f"1. 你认识这个证物吗？\n"
+                    f"2. 你对此有什么反应？（惊讶/回避/承认/混淆等）\n"
+                    f"3. 你说出的话是否隐瞒了什么？\n"
+                    f"语气要贴合角色性格。注意：如果证物对角色不利，你可能会狡辩或转移话题。"
                 )
 
                 ai_response = respond_initial(
@@ -471,24 +340,6 @@ async def present_evidence(req: EvidencePresentationRequest):
         )
 
         session.commit()
-
-        if evidence.session_id:
-            try:
-                from api.agents.game_engine import game_engine
-                game_engine.record_evidence_presentation(
-                    game_id=evidence.session_id,
-                    evidence={
-                        "id": evidence.id,
-                        "name": evidence.name,
-                        "description": evidence.basic_description or "",
-                    },
-                    presented_by=req.presentedBy,
-                    presented_to=req.presentedTo,
-                    reason=req.textContent or "",
-                    ai_response=ai_response,
-                )
-            except Exception as mem_err:
-                logger.warning(f"证物记忆写入失败（非致命）: {mem_err}")
 
         return {
             "success": True,

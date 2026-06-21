@@ -14,12 +14,45 @@ from fastapi.responses import StreamingResponse
 
 from api.schemas.invoke_types import InvocationRequest
 from api.llm.llm_service import ROLE_SYSTEM_PROMPTS
-from api.agents.game_engine import game_engine
-from api.agents.game_context import build_game_context_prompt, find_agent_key
+from api.agents.game_engine import game_engine, GamePhase, PHASE_CONFIG
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _build_game_context_prompt(session_id: str, actor_name: str) -> str:
+    """从 game_engine 读取当前游戏状态，构建环境上下文 prompt 片段。"""
+    game = game_engine.get_game(session_id)
+    if not game:
+        return ""
+
+    phase = game.get("current_phase", "")
+    phase_config = PHASE_CONFIG.get(GamePhase(phase)) if phase else None
+    agent_state = game.get("agents", {}).get(actor_name)
+
+    parts = []
+
+    if phase_config:
+        parts.append(
+            f"【当前游戏阶段】{phase_config['display_name']}\n{phase_config['description']}\n"
+            f"阶段指引：{phase_config['phase_prompt']}"
+        )
+    else:
+        parts.append(f"【当前游戏阶段】{phase}")
+
+    if agent_state:
+        if agent_state.compressed_summary:
+            parts.append(f"【记忆摘要】{agent_state.compressed_summary}")
+        if agent_state.key_facts:
+            parts.append(f"【已确认的关键事实】\n" + "\n".join(f"- {f}" for f in agent_state.key_facts[-5:]))
+        if agent_state.discovered_evidences:
+            ev_lines = []
+            for ev in agent_state.discovered_evidences[-8:]:
+                ev_lines.append(f"- {ev.get('name', '?')}: {ev.get('description', '')}")
+            parts.append("【已发现的证物】\n" + "\n".join(ev_lines))
+
+    return "\n\n".join(parts)
 
 
 @router.post("/stream")
@@ -46,11 +79,7 @@ async def invoke_ai_stream(req: InvocationRequest):
 
     # 注入游戏环境上下文（如果提供了 session_id）
     if req.session_id:
-        game_context = build_game_context_prompt(
-            req.session_id,
-            req.actor.name,
-            req.speech_phase or None,
-        )
+        game_context = _build_game_context_prompt(req.session_id, req.actor.name)
         if game_context:
             system_prompt += f"\n\n---\n{game_context}"
 
@@ -112,14 +141,9 @@ async def invoke_ai_stream(req: InvocationRequest):
 
                     db_session = get_session()
                     try:
-                        # 查找正确的 agent_key 用于记录同步
-                        _game = game_engine.get_game(req.session_id)
-                        _agent_key = find_agent_key(_game, req.actor.name) if _game else None
-
                         turn = ConversationTurn(
                             id=f"turn_{uuid.uuid4().hex[:8]}",
                             session_id=req.session_id,
-                            # 存储时 actor_name 保持为角色名，方便前端查询
                             actor_name=req.actor.name,
                             chat_messages=[m.model_dump() for m in req.chat_messages],
                             original_response=full_response,
@@ -131,14 +155,13 @@ async def invoke_ai_stream(req: InvocationRequest):
                         db_session.commit()
 
                         # 同步到 Agent 游戏状态
-                        if _agent_key:
-                            game_engine.add_chat_to_agent(
-                                game_id=req.session_id,
-                                agent_key=_agent_key,
-                                role=req.actor.name,
-                                content=full_response,
-                            )
-                            game_engine.record_chat(game_id=req.session_id)
+                        game_engine.add_chat_to_agent(
+                            game_id=req.session_id,
+                            agent_key=req.actor.name,
+                            role=req.actor.name,
+                            content=full_response,
+                        )
+                        game_engine.record_chat(game_id=req.session_id)
                     except Exception as db_err:
                         logger.warning(f"流式自动保存对话失败（非致命）: {db_err}")
                     finally:

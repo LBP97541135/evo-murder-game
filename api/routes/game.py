@@ -5,7 +5,6 @@ EvoMap Murder Game - Game Session Routes
 v2.1 新增：Agent 游戏状态、意图系统、记忆压缩。
 """
 
-import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
@@ -14,9 +13,6 @@ from api.schemas.invoke_types import GameSessionRequest, GameSessionResponse
 from api.agents.agent_orchestrator import AgentRole
 from api.agents.game_engine import game_engine, GamePhase
 from api.orchestrator import orchestrator
-from api.db.models import get_session, Script, ConversationTurn, EvidenceRecord, evidence_record_to_dict
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -33,7 +29,6 @@ class VoteRequest(BaseModel):
 
 class PhaseForceRequest(BaseModel):
     phase: str
-    frontend_phase_index: Optional[int] = None
 
 
 class AgentChatRequest(BaseModel):
@@ -65,18 +60,6 @@ class ForceAnswerRequest(BaseModel):
     question: str
 
 
-class CastEntry(BaseModel):
-    type: str             # "agent" | "player"
-    role: str
-    agentKey: str = ""
-    agent_key: str = ""
-
-
-class ApplyCastRequest(BaseModel):
-    cast: list[CastEntry]
-    player_character_name: str = ""
-
-
 # ============================
 # 游戏 Session
 # ============================
@@ -84,34 +67,8 @@ class ApplyCastRequest(BaseModel):
 @router.post("/create-session", response_model=GameSessionResponse)
 async def create_game_session(req: GameSessionRequest):
     """创建游戏 Session，同时初始化游戏引擎和所有 Agent 游戏状态。"""
-    logger.info(f"Creating game session for script_id={req.script_id}, topic={req.topic}, player_character={req.player_character_name}")
     if not orchestrator.agents:
-        logger.error("No agents registered")
         raise HTTPException(status_code=400, detail="No agents registered yet")
-
-    # 校验陪玩 Agent 数量是否足够覆盖剧本角色
-    companion_count = len([a for a in orchestrator.agents.values() if a.role == AgentRole.COMPANION])
-    db_session = get_session()
-    try:
-        script = db_session.query(Script).filter(Script.id == req.script_id).first()
-        if script:
-            playable_count = len([c for c in script.characters if not c.is_victim])
-            char_count = playable_count
-            logger.info(f"Script '{script.title}' has {char_count} playable characters. Available companions: {companion_count}")
-            # 允许 1 名真人玩家，所以需要的陪玩 Agent 数为可玩角色数 - 1（无真人时需全部可玩角色）
-            needed_companions = char_count
-            if req.player_character_name and req.player_character_name.strip():
-                needed_companions = char_count - 1
-            if needed_companions > companion_count:
-                logger.error(f"Not enough companions. Need {needed_companions}, have {companion_count}")
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"剧本「{script.title}」需要 {needed_companions} 个陪玩 Agent（可玩角色 {char_count} 个"
-                           f"{'' if not req.player_character_name else '，含 1 名真人玩家'}），"
-                           f"但目前仅有 {companion_count} 个可用",
-                )
-    finally:
-        db_session.close()
 
     result = orchestrator.create_game_session(
         topic=req.topic,
@@ -119,76 +76,23 @@ async def create_game_session(req: GameSessionRequest):
     )
 
     if "error" in result:
-        logger.error(f"Orchestrator failed to create session: {result}")
         raise HTTPException(status_code=500, detail=result)
 
     session_id = result.get("session_id", "")
     session_info = orchestrator.sessions.get(session_id, {})
 
     # 初始化游戏引擎（同时初始化 Agent 游戏状态 + 胶囊注入）
-    game_engine.create_game(script_id=req.script_id, session_id=session_id, player_character_name=req.player_character_name)
-    from api.capsules.dm_evolution_service import inject_all_capsules_for_agents
-    inject_all_capsules_for_agents()
-    logger.info(f"Successfully created game session: {session_id}, player_character={req.player_character_name}")
+    game_engine.create_game(
+        script_id=req.script_id,
+        session_id=session_id,
+        player_role_id=req.player_role_id,
+    )
 
     return GameSessionResponse(
         session_id=session_id,
         participants=session_info.get("companions", []),
         status="active",
     )
-
-
-@router.post("/cast/{session_id}")
-async def apply_game_cast(session_id: str, req: ApplyCastRequest):
-    """同步前端选角结果到游戏引擎。"""
-    cast_payload = []
-    for entry in req.cast:
-        item = entry.model_dump()
-        if not item.get("agentKey") and item.get("agent_key"):
-            item["agentKey"] = item["agent_key"]
-        cast_payload.append(item)
-    try:
-        result = game_engine.apply_cast(
-            game_id=session_id,
-            cast=cast_payload,
-            player_character_name=req.player_character_name or None,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"success": True, **result}
-
-
-@router.get("/role-evidences/{session_id}")
-async def get_role_evidences(session_id: str):
-    """获取各角色初始分配的证物（2 关联 + 2 随机）。"""
-    game = game_engine.get_game(session_id)
-    if not game:
-        raise HTTPException(status_code=404, detail="game_not_found")
-    role_evidences = game.get("role_evidences") or {}
-    if not role_evidences:
-        for _key, state in game.get("agents", {}).items():
-            role_name = (state.character or {}).get("name", "")
-            if role_name and state.discovered_evidences:
-                role_evidences[role_name] = state.discovered_evidences
-    player_role = game.get("player_character_name", "")
-    return {
-        "success": True,
-        "role_evidences": role_evidences,
-        "player_role": player_role,
-        "player_evidences": role_evidences.get(player_role, []),
-    }
-
-
-@router.get("/public-evidences/{session_id}")
-async def get_public_evidences(session_id: str):
-    """获取本局已公开出示的证物列表。"""
-    game = game_engine.get_game(session_id)
-    if not game:
-        raise HTTPException(status_code=404, detail="game_not_found")
-    return {
-        "success": True,
-        "public_evidences": game.get("public_evidences") or [],
-    }
 
 
 # ============================
@@ -216,11 +120,7 @@ async def advance_game_phase(session_id: str):
 @router.post("/phase/{session_id}/force")
 async def force_game_phase(session_id: str, req: PhaseForceRequest):
     """强制跳转到指定阶段（DM权限）。"""
-    result = game_engine.force_phase(
-        session_id,
-        req.phase,
-        frontend_phase_index=req.frontend_phase_index,
-    )
+    result = game_engine.force_phase(session_id, req.phase)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result)
     return result
@@ -239,15 +139,6 @@ async def submit_vote(session_id: str, req: VoteRequest):
         motive=req.motive,
         voter=req.voter,
     )
-    if "error" in result:
-        raise HTTPException(status_code=400, detail=result)
-    return result
-
-
-@router.post("/vote/{session_id}/agents")
-async def submit_agent_votes(session_id: str):
-    """为所有 Agent 角色生成并提交投票。"""
-    result = game_engine.submit_agent_votes(session_id)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result)
     return result
@@ -291,29 +182,6 @@ async def record_chat(session_id: str):
 async def post_game_reflection(session_id: str, game_result: dict):
     """游戏结束后，所有 Agent 执行自评并记录经验。"""
     return orchestrator.post_game_reflection(session_id, game_result)
-
-
-@router.get("/review/{session_id}")
-async def get_game_review(session_id: str):
-    """获取 DM 复盘包（真相揭示、角色评分、基因与胶囊）。"""
-    from api.capsules.dm_evolution_service import get_review_bundle
-
-    bundle = get_review_bundle(session_id)
-    if not bundle.get("success") and bundle.get("message") == "review_not_generated":
-        return bundle
-    return bundle
-
-
-@router.post("/review/{session_id}/run")
-async def run_game_review(session_id: str):
-    """运行完整 DM 复盘 + 并行评分 + 基因/胶囊自进化流水线。"""
-    from api.capsules.dm_evolution_service import run_full_evolution_pipeline
-
-    try:
-        result = run_full_evolution_pipeline(session_id)
-        return {"success": True, **result}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ============================
@@ -421,6 +289,7 @@ async def get_session_info(session_id: str):
         "success": True,
         "session_id": session_id,
         "phase": phase_info,
+        "player": game.get("player_character"),
         "agents": agents_info,
         "speak_round": speak_round,
         "script_id": game.get("script_id", ""),
@@ -430,272 +299,6 @@ async def get_session_info(session_id: str):
         "reveal_data": game.get("reveal_data"),   # 后剧情数据（REVEAL 阶段可用）
         "phase_history": game.get("phase_history", []),
         "started_at": game.get("started_at", ""),
-    }
-
-
-# ============================
-# 角色私人剧本（替代前端硬编码 SCRIPT_CHAPTERS）
-# ============================
-
-@router.get("/my-script/{session_id}")
-async def get_my_script(session_id: str, character_name: str = "", character_id: str = ""):
-    """获取指定角色的私人剧本（章节格式）——用于前端 script-reading 阶段。"""
-    logger.info(f"Fetching script for session={session_id}, char_name={character_name}, char_id={character_id}")
-    game = game_engine.get_game(session_id)
-    if not game:
-        logger.error(f"Game not found for session {session_id}")
-        raise HTTPException(status_code=404, detail="Game not found")
-
-    # 如果未指定角色名，使用游戏会话中记录的玩家角色名
-    if not character_name and not character_id:
-        player_char = game.get("player_character_name", "")
-        if player_char:
-            character_name = player_char
-            logger.info(f"Using player_character_name from game: {player_char}")
-
-    # 先从 agent states 中查找角色
-    character = {}
-    for key, agent_state in game.get("agents", {}).items():
-        ch = agent_state.character
-        if character_name and ch.get("name") == character_name:
-            character = ch
-            logger.info(f"Found character {character_name} in agent {key}")
-            break
-        if character_id and ch.get("id") == character_id:
-            character = ch
-            logger.info(f"Found character ID {character_id} in agent {key}")
-            break
-
-    # 侦探/观战身份：返回全局故事，不查嫌疑人角色表
-    observer_names = {"侦探", "林晓青", "林晓青 · 侦探", "林晓青·侦探"}
-    is_observer = (
-        character_name in observer_names
-        or (character_name and character_name.startswith("林晓青"))
-    )
-
-    # 从数据库加载剧本和 global_story（统一一次查询）
-    db_session = get_session()
-    global_story = ""
-    try:
-        script = db_session.query(Script).filter(Script.id == game.get("script_id", "")).first()
-        if script:
-            global_story = script.global_story or ""
-
-        if is_observer:
-            chapters = []
-            if global_story:
-                chapters.append({"title": "序幕 · 故事背景", "content": global_story})
-            if not chapters:
-                chapters.append({
-                    "title": "侦探手册",
-                    "content": "你以第三方侦探身份参与本案调查，可质询、搜证与投票，但不掌握嫌疑人秘密。",
-                })
-            return {
-                "success": True,
-                "character_name": "林晓青 · 侦探",
-                "character_id": "",
-                "image": "",
-                "role_type": "detective",
-                "is_killer": False,
-                "is_victim": False,
-                "is_observer": True,
-                "chapters": chapters,
-            }
-
-        # 未在 agent states 中找到 → 从数据库角色表查找
-        if script and not character:
-            logger.info(f"Character {character_name}/{character_id} not found in agents, checking database...")
-            for ch_obj in script.characters:
-                if character_name and ch_obj.name == character_name:
-                    character = {
-                        "id": ch_obj.id, "name": ch_obj.name,
-                        "bio": ch_obj.bio or "", "personality": ch_obj.personality or "",
-                        "context": ch_obj.context or "", "secret": ch_obj.secret or "",
-                        "violation": ch_obj.violation or "",
-                        "image": ch_obj.image_filename or ch_obj.image or "",
-                        "roleType": ch_obj.role_type,
-                        "isKiller": ch_obj.is_killer, "isVictim": ch_obj.is_victim,
-                    }
-                    break
-                if character_id and ch_obj.id == character_id:
-                    character = {
-                        "id": ch_obj.id, "name": ch_obj.name,
-                        "bio": ch_obj.bio or "", "personality": ch_obj.personality or "",
-                        "context": ch_obj.context or "", "secret": ch_obj.secret or "",
-                        "violation": ch_obj.violation or "",
-                        "image": ch_obj.image_filename or ch_obj.image or "",
-                        "roleType": ch_obj.role_type,
-                        "isKiller": ch_obj.is_killer, "isVictim": ch_obj.is_victim,
-                    }
-                    break
-            # 降级：返回第一个 is_player 角色，或第一个角色
-            if not character and not character_name and not character_id:
-                for ch_obj in script.characters:
-                    if ch_obj.is_player:
-                        character = {
-                            "id": ch_obj.id, "name": ch_obj.name,
-                            "bio": ch_obj.bio or "", "personality": ch_obj.personality or "",
-                            "context": ch_obj.context or "", "secret": ch_obj.secret or "",
-                            "violation": ch_obj.violation or "",
-                            "image": ch_obj.image_filename or ch_obj.image or "",
-                            "roleType": ch_obj.role_type,
-                            "isKiller": ch_obj.is_killer, "isVictim": ch_obj.is_victim,
-                        }
-                        break
-                if not character and script.characters:
-                    ch_obj = script.characters[0]
-                    character = {
-                        "id": ch_obj.id, "name": ch_obj.name,
-                        "bio": ch_obj.bio or "", "personality": ch_obj.personality or "",
-                        "context": ch_obj.context or "", "secret": ch_obj.secret or "",
-                        "violation": ch_obj.violation or "",
-                        "image": ch_obj.image_filename or ch_obj.image or "",
-                        "roleType": ch_obj.role_type,
-                        "isKiller": ch_obj.is_killer, "isVictim": ch_obj.is_victim,
-                    }
-    finally:
-        db_session.close()
-
-    if not character:
-        raise HTTPException(status_code=404, detail="Character not found")
-
-    # 构建章节
-    chapters = []
-    ch_name = character.get("name", "未知角色")
-
-    if global_story:
-        chapters.append({"title": "序幕 · 故事背景", "content": global_story})
-
-    bio = character.get("bio", "")
-    context = character.get("context", "")
-    if bio or context:
-        chapters.append({
-            "title": f"第一章 · {ch_name}的背景",
-            "content": f"{bio}\n\n{context}" if bio and context else (bio or context),
-        })
-
-    secret = character.get("secret", "")
-    if secret:
-        chapters.append({"title": f"第二章 · {ch_name}的秘密", "content": secret})
-
-    violation = character.get("violation", "")
-    if violation:
-        chapters.append({"title": f"第三章 · {ch_name}的行为限制", "content": violation})
-
-    if not chapters:
-        chapters.append({"title": "剧本", "content": "（暂无角色剧本数据）"})
-
-    return {
-        "success": True,
-        "character_name": ch_name,
-        "character_id": character.get("id", ""),
-        "image": character.get("image", ""),
-        "role_type": character.get("roleType", ""),
-        "is_killer": character.get("isKiller", False),
-        "is_victim": character.get("isVictim", False),
-        "chapters": chapters,
-    }
-
-
-# ============================
-# 游戏状态快照（替代已回退的 /game/snapshot）
-# ============================
-
-@router.get("/snapshot/{session_id}")
-async def get_game_snapshot(session_id: str):
-    """一站式恢复游戏状态——前端页面刷新后用于重建全部 UI 状态。
-
-    返回：阶段、角色映射、证物列表、对话记录、投票结果、后剧情数据。
-    """
-    game = game_engine.get_game(session_id)
-    if not game:
-        raise HTTPException(status_code=404, detail="Game not found")
-
-    phase_info = game_engine.get_phase_info(session_id)
-    if "error" in phase_info:
-        raise HTTPException(status_code=404, detail=phase_info["error"])
-
-    # Agent 状态摘要
-    agents_info = []
-    for key, agent_state in game.get("agents", {}).items():
-        ch = agent_state.character
-        agents_info.append({
-            "key": key,
-            "name": ch.get("name", key),
-            "character_id": ch.get("id", ""),
-            "role_type": ch.get("roleType", "unknown"),
-            "is_killer": ch.get("isKiller", False),
-            "is_victim": ch.get("isVictim", False),
-            "image": ch.get("image", ""),
-            "bio": ch.get("bio", ""),
-            "personality": ch.get("personality", ""),
-            "has_intents": any(v is not None for v in (agent_state.intents or {}).values()),
-        })
-
-    # 对话记录（用于事件重建）
-    conversation_events = []
-    db_session = get_session()
-    try:
-        conversations = db_session.query(ConversationTurn).filter(
-            ConversationTurn.session_id == session_id
-        ).order_by(ConversationTurn.created_at.asc()).all()
-        for conv in conversations:
-            conversation_events.append({
-                "actor_name": conv.actor_name,
-                "final_response": conv.final_response or conv.original_response,
-                "created_at": conv.created_at.isoformat() if conv.created_at else "",
-            })
-    finally:
-        db_session.close()
-
-    # 证物列表
-    evidence_list = []
-    ev_session = get_session()
-    try:
-        evidences = ev_session.query(EvidenceRecord).filter(
-            EvidenceRecord.session_id == session_id,
-        ).all()
-        evidence_list = [evidence_record_to_dict(e) for e in evidences]
-    finally:
-        ev_session.close()
-
-    # 前端阶段映射（搜证与讨论共用 investigation，需持久化 frontend_phase_index）
-    backend_phase = game.get("current_phase", "intro")
-    frontend_phase_map = {
-        "intro": 2,
-        "investigation": 3,
-        "voting": 5,
-        "reveal": 6,
-        "review": 7,
-    }
-    stored_frontend_index = game.get("frontend_phase_index")
-    if stored_frontend_index is not None:
-        frontend_phase_index = stored_frontend_index
-    else:
-        frontend_phase_index = frontend_phase_map.get(backend_phase, 0)
-        if backend_phase == "investigation" and game.get("chat_count", 0) >= 1:
-            frontend_phase_index = max(frontend_phase_index, 4)
-
-    return {
-        "success": True,
-        "session_id": session_id,
-        "script_id": game.get("script_id", ""),
-        "backend_phase": backend_phase,
-        "frontend_phase_index": frontend_phase_index,
-        "agents": agents_info,
-        "evidences": evidence_list,
-        "conversations": conversation_events,
-        "vote_result": game.get("vote_result"),
-        "reveal_data": game.get("reveal_data"),
-        "phase_history": game.get("phase_history", []),
-        "chat_count": game.get("chat_count", 0),
-        "hints_used": game.get("hints_used", 0),
-        "started_at": game.get("started_at", ""),
-        "cast": game.get("cast", []),
-        "player_character_name": game.get("player_character_name", ""),
-        "role_evidences": game.get("role_evidences", {}),
-        "public_evidences": game.get("public_evidences", []),
-        "dm_review": game.get("dm_review"),
     }
 
 
@@ -825,17 +428,14 @@ async def agent_chat(session_id: str, req: AgentChatRequest):
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
 
-    from api.agents.game_context import find_agent_key
-    target_key = find_agent_key(game, req.agent_key) or req.agent_key
-
     # 写入 chat_history
-    game_engine.add_chat_to_agent(session_id, target_key, req.role, req.content)
-    game_engine.record_chat(session_id, from_agent=target_key, content=req.content)
+    game_engine.add_chat_to_agent(session_id, req.agent_key, req.role, req.content)
+    game_engine.record_chat(session_id, from_agent=req.agent_key, content=req.content)
 
     return {
         "success": True,
         "session_id": session_id,
-        "agent_key": target_key,
+        "agent_key": req.agent_key,
         "chat_count": game.get("chat_count", 0),
     }
 
@@ -946,7 +546,11 @@ async def get_private_thread(session_id: str, thread_id: str):
 
 @router.post("/force-answer/{session_id}")
 async def force_answer(session_id: str, req: ForceAnswerRequest):
-    """公共喊话——被喊话者须立刻回复，但不改变发言队列顺序。"""
+    """强制指定 Agent 回答问题。
+
+    被指定的 Agent 插入发言队列最前面，其他角色不可插队。
+    回答完毕后调用 /force-answer/{id}/clear 清除状态。
+    """
     result = game_engine.force_answer(
         game_id=session_id,
         asker_key=req.asker_key,

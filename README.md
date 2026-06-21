@@ -86,7 +86,7 @@ pip install -r api/requirements.txt
 cp api/config/.env.example api/config/.env   # 编辑 .env 填入你的 API Key
 
 # 启动服务
-python -m uvicorn api.main:app --reload --port 10001
+python -m uvicorn api.main:app --reload --port 8000
 ```
 
 ### 2. 前端启动

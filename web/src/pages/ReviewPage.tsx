@@ -30,7 +30,6 @@ import {
   IconBulb,
   IconChartBar,
   IconDna,
-  IconDeviceGamepad2,
   IconEye,
   IconFlame,
   IconHeart,
@@ -41,11 +40,9 @@ import {
   IconUserCircle,
   IconUsers,
 } from "@tabler/icons-react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
-import { GAME_PLAYERS } from "./gameMockData";
-import { scripts } from "./scriptData";
-import { buildPlayPath, getStoredGameSession } from "../utils/gameNavigation";
+import { GAME_PLAYERS, type GamePlayer } from "./gameMockData";
 
 // ============================
 // 角色立绘
@@ -57,7 +54,6 @@ const characterPortraits: Record<string, string> = {
   "沈禾": new URL("../Character/沈禾.png", import.meta.url).href,
   "周岚": new URL("../Character/周岚.png", import.meta.url).href,
   "秦野": new URL("../Character/秦野.png", import.meta.url).href,
-  "林远": new URL("../Character/林远.png", import.meta.url).href,
 };
 
 const dmPortrait = new URL("../video_picture/雾港主理人.png", import.meta.url).href;
@@ -95,7 +91,7 @@ const SCORE_DIMENSIONS: ScoreDimension[] = [
 ];
 
 // ============================
-// 模拟复盘数据（对应 GAME_PLAYERS 中非 DM 的 6 个角色）
+// 模拟复盘数据（对应 GAME_PLAYERS 中非 DM 的 5 个角色）
 // ============================
 
 interface PlayerReview {
@@ -135,12 +131,6 @@ const MOCK_REVIEWS: PlayerReview[] = [
     compositeScore: 80,
     dimensions: { evidenceCount: 78, clueMastery: 80, logicClarity: 78, activity: 88, progress: 82, roleImmersion: 72, collaboration: 75, reasoningAccuracy: 76 },
     dmComment: "推进节奏积极，控场能力不错。但角色代入可以更深入，避免过于功能化的发言。",
-  },
-  {
-    playerId: "lin",
-    compositeScore: 68,
-    dimensions: { evidenceCount: 55, clueMastery: 60, logicClarity: 65, activity: 58, progress: 62, roleImmersion: 82, collaboration: 78, reasoningAccuracy: 60 },
-    dmComment: "角色代入感不错，但发言过于保守。掌握的关键信息没有及时分享，建议下次更主动地参与讨论。",
   },
 ];
 
@@ -301,10 +291,7 @@ function getSeatPosition(index: number, total: number) {
 
 export function ReviewPage() {
   const navigate = useNavigate();
-  const { id = "xiutie-avenue-missing-three-minutes" } = useParams();
-  const [searchParams] = useSearchParams();
-  const sessionId = searchParams.get("session") || getStoredGameSession(id);
-  const scriptTitle = scripts.find((script) => script.id === id)?.title || "未知剧本";
+  const { id = "iron-avenue" } = useParams();
 
   const [reviewTab, setReviewTab] = React.useState<string | null>("table");
   const [selectedPlayerId, setSelectedPlayerId] = React.useState<string | null>(null);
@@ -344,39 +331,21 @@ export function ReviewPage() {
     >
       <Stack gap="xl" p="lg" maw={1200} mx="auto">
         {/* 顶部返回栏 */}
-        <Group justify="space-between" wrap="wrap">
+        <Group justify="space-between">
+          <Button
+            variant="subtle"
+            leftSection={<IconArrowLeft size={16} />}
+            radius="xl"
+            onClick={() => navigate("/games")}
+          >
+            返回我的游戏
+          </Button>
           <Group gap="xs">
-            <Button
-              variant="subtle"
-              leftSection={<IconArrowLeft size={16} />}
-              radius="xl"
-              onClick={() => navigate("/games")}
-            >
-              返回我的游戏
-            </Button>
-            <Button
-              variant="subtle"
-              leftSection={<IconDeviceGamepad2 size={16} />}
-              radius="xl"
-              onClick={() => navigate(buildPlayPath(id))}
-            >
-              回到对局
-            </Button>
+            <Text className="monospace-label" size="xs" c="dimmed">
+              post-game review
+            </Text>
+            <Badge color="red" variant="filled">复盘</Badge>
           </Group>
-          <Stack gap={2} align="flex-end">
-            <Group gap="xs">
-              <Text className="monospace-label" size="xs" c="dimmed">
-                post-game review
-              </Text>
-              <Badge color="red" variant="filled">复盘</Badge>
-            </Group>
-            <Text size="sm" fw={700}>{scriptTitle}</Text>
-            {sessionId && (
-              <Badge size="sm" variant="outline" color="gray">
-                会话 {sessionId.slice(0, 8)}…
-              </Badge>
-            )}
-          </Stack>
         </Group>
 
         {/* Tab 切换 */}
@@ -479,7 +448,7 @@ export function ReviewPage() {
                             </Box>
                           }
                         />
-                        {/* 角色名 */}
+                        {/* 角色名（头像上方） */}
                         <Text size="xs" fw={700} ta="center" lh={1.1} mt={2}>
                           {player.role}
                         </Text>

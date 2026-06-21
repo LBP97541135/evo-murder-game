@@ -5,7 +5,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import "@mantine/core/styles.css";
-import App from "./AppShell";
+import App from "./App";
 
 const root = ReactDOM.createRoot(
   document.getElementById("root") as HTMLElement

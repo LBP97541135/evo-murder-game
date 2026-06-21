@@ -15,15 +15,14 @@ import {
 } from "@mantine/core";
 import {
   IconCalendar,
-  IconChartBar,
   IconClock,
-  IconDeviceGamepad2,
+  IconPlayerPlay,
+  IconRefresh,
   IconUsers,
 } from "@tabler/icons-react";
 import { useNavigate } from "react-router-dom";
 
 import { StudioShell } from "./StudioShell";
-import { buildPlayPath, buildReviewPath, getStoredGameSession } from "../utils/gameNavigation";
 
 type GameStatus = "进行中" | "已完成";
 
@@ -43,8 +42,8 @@ type GameRecord = {
 
 const gameRecords: GameRecord[] = [
   {
-    id: "xiutie-avenue-missing-three-minutes",
-    title: "铁锈大道 · 消失的3分钟",
+    id: "iron-avenue",
+    title: "锈铁大道",
     subtitle: "The Rusted Avenue",
     status: "进行中",
     playedAt: "2026-06-18 20:30",
@@ -131,7 +130,7 @@ function MyGamesPage() {
                 game archive
               </Text>
               <Title order={2}>历史游戏列表</Title>
-              <Text c="dimmed">进行中的对局进入游戏主界面；已完成的对局可查看完整复盘看板。</Text>
+              <Text c="dimmed">点击任意游戏卡片或操作按钮进入该游戏的主界面。</Text>
             </Stack>
             <SegmentedControl
               value={filter}
@@ -146,18 +145,13 @@ function MyGamesPage() {
         </Paper>
 
         <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg">
-          {filteredRecords.map((game) => {
-            const openGame = () => navigate(buildPlayPath(game.id));
-            const openReview = () => navigate(buildReviewPath(game.id, getStoredGameSession(game.id)));
-            const openRecord = game.status === "已完成" ? openReview : openGame;
-
-            return (
+          {filteredRecords.map((game) => (
             <Card
               key={game.id}
               radius="xl"
               p="lg"
               className="industrial-card"
-              onClick={openRecord}
+              onClick={() => navigate(`/play/${game.id}`)}
               style={{ cursor: "pointer" }}
             >
               <Grid gutter="lg">
@@ -217,55 +211,32 @@ function MyGamesPage() {
                       />
                     </Stack>
 
-                    <Group mt="xs" grow={game.status === "已完成"}>
-                      {game.status === "进行中" ? (
-                        <Button
-                          radius="xl"
-                          variant="light"
-                          color="red"
-                          leftSection={<IconDeviceGamepad2 size={16} />}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            openGame();
-                          }}
-                        >
-                          继续游戏
-                        </Button>
-                      ) : (
-                        <>
-                          <Button
-                            radius="xl"
-                            variant="light"
-                            color="teal"
-                            leftSection={<IconChartBar size={16} />}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              openReview();
-                            }}
-                          >
-                            查看复盘
-                          </Button>
-                          <Button
-                            radius="xl"
-                            variant="subtle"
-                            color="gray"
-                            leftSection={<IconDeviceGamepad2 size={16} />}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              openGame();
-                            }}
-                          >
-                            回到对局
-                          </Button>
-                        </>
-                      )}
-                    </Group>
+                    <Button
+                      mt="xs"
+                      radius="xl"
+                      variant={game.status === "进行中" ? "filled" : "light"}
+                      color={game.status === "进行中" ? "red" : "gray"}
+                      leftSection={
+                        game.status === "进行中"
+                          ? <IconPlayerPlay size={16} />
+                          : <IconRefresh size={16} />
+                      }
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (game.status === "进行中") {
+                          navigate(`/play/${game.id}`);
+                        } else {
+                          navigate(`/review/${game.id}`);
+                        }
+                      }}
+                    >
+                      {game.status === "进行中" ? "继续游戏" : "查看游戏与复盘"}
+                    </Button>
                   </Stack>
                 </Grid.Col>
               </Grid>
             </Card>
-            );
-          })}
+          ))}
         </SimpleGrid>
       </Stack>
     </StudioShell>

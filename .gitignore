@@ -4,7 +4,7 @@
 
 # --- 红线：绝不提交 ---
 .env
-*.db
+# *.db
 !data/murder_mystery.db
 murder_mystery.db
 

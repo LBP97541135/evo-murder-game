@@ -387,35 +387,12 @@ class AgentNode:
 class AgentOrchestrator:
     """多Agent编排器：管理一组 Agent 的注册、Session 创建和任务调度。"""
 
-    def __init__(self, hub_url: str = ""):
-        self.hub_url = hub_url or ""
+    def __init__(self, hub_url: str = "https://evomap.ai"):
+        self.hub_url = hub_url
         self.agents: dict[str, AgentNode] = {}
         self.sessions: dict[str, dict] = {}
         # 启动时从数据库恢复已注册的 Agent
         self._load_agents_from_db()
-        # 如果数据库没有 Agent，自动创建默认的本地 Agent（不依赖 EvoMap）
-        if not self.agents:
-            self._init_default_agents()
-        else:
-            # 补充数据库中缺少的默认 Agent
-            self._ensure_default_companions()
-
-    # 英文名 → 中文名映射（兼容旧数据库中的英文名 Agent）
-    _EN_TO_CN_NAMES = {
-        "white-crow": "白鸦",
-        "echo": "回声",
-        "paper-owl": "纸鸮",
-        "flint": "燧石",
-        "undertow": "暗潮",
-        "luna-moth": "月蛾",
-        "moon-moth": "月蛾",
-        "shadow-weaver": "影织者",
-        "night-cicada": "夜蝉",
-        "candle-core": "暮烛引导员",
-        "mist-harbor": "雾港主理人",
-        "iron-judge": "铁幕裁判",
-        "DM-Persist": "雾港主理人",
-    }
 
     def _load_agents_from_db(self) -> None:
         """从数据库恢复已注册的 Agent 到内存。"""
@@ -425,11 +402,9 @@ class AgentOrchestrator:
             try:
                 db_agents = db_session.query(AgentNodeModel).all()
                 for db_agent in db_agents:
-                    # 英文名自动映射为中文名
-                    resolved_name = self._EN_TO_CN_NAMES.get(db_agent.name, db_agent.name)
                     agent = AgentNode(
                         role=AgentRole(db_agent.role),
-                        name=resolved_name,
+                        name=db_agent.name,
                         model=db_agent.model,
                         node_id=db_agent.node_id,
                         node_secret=db_agent.node_secret,
@@ -439,84 +414,12 @@ class AgentOrchestrator:
                     agent.registered = (db_agent.status == "alive")
                     key = f"{agent.role.value}_{agent.name}"
                     self.agents[key] = agent
-                    # 同步更新数据库中的名称
-                    if resolved_name != db_agent.name:
-                        db_agent.name = resolved_name
-                        db_session.commit()
                 if db_agents:
                     logger.info(f"从数据库恢复了 {len(db_agents)} 个 Agent")
             finally:
                 db_session.close()
         except Exception as e:
             logger.error(f"从数据库恢复 Agent 失败: {e}")
-
-    def _ensure_default_companions(self) -> None:
-        """检查并补充数据库中缺少的默认 companion Agent。"""
-        default_companions = [
-            {"name": "白鸦", "key_hint": "white-crow"},
-            {"name": "回声", "key_hint": "echo"},
-            {"name": "纸鸮", "key_hint": "paper-owl"},
-            {"name": "燧石", "key_hint": "flint"},
-            {"name": "暗潮", "key_hint": "undertow"},
-            {"name": "月蛾", "key_hint": "luna-moth"},
-            {"name": "影织者", "key_hint": "shadow-weaver"},
-        ]
-        existing_names = {a.name for a in self.agents.values() if a.role.value == "companion"}
-        added = 0
-        for comp in default_companions:
-            if comp["name"] not in existing_names:
-                agent = AgentNode(
-                    role=AgentRole.COMPANION,
-                    name=comp["name"],
-                    model="evomap-deepseek-v4-flash",
-                )
-                agent.node_id = f"local_cp_{uuid.uuid4().hex[:8]}"
-                agent.node_secret = f"local_secret_{uuid.uuid4().hex[:12]}"
-                self.add_agent(agent)
-                self._save_agent_to_db(agent, f"companion_{comp['name']}")
-                added += 1
-        if added:
-            logger.info(f"补充创建了 {added} 个缺少的 companion Agent")
-
-    def _init_default_agents(self) -> None:
-        """创建默认 Agent（纯本地模式，不依赖 EvoMap）。
-
-        创建 1 个 DM + 4 个陪玩 Agent，使用预设人设模板。
-        这样前端无需先调 /agents/register 即可直接开始游戏。
-        """
-        logger.info("未找到已注册 Agent，自动创建默认本地 Agent...")
-
-        # DM
-        dm = AgentNode(
-            role=AgentRole.DM,
-            name="雾港主理人",
-            model="evomap-deepseek-v4-flash",
-        )
-        dm.node_id = f"local_dm_{uuid.uuid4().hex[:8]}"
-        dm.node_secret = f"local_secret_{uuid.uuid4().hex[:12]}"
-        dm_key = self.add_agent(dm)
-
-        # Companion 列表
-        default_companions = [
-            {"name": "白鸦", "key_hint": "white-crow"},
-            {"name": "回声", "key_hint": "echo"},
-            {"name": "纸鸮", "key_hint": "paper-owl"},
-            {"name": "燧石", "key_hint": "flint"},
-            {"name": "暗潮", "key_hint": "undertow"},
-            {"name": "月蛾", "key_hint": "luna-moth"},
-            {"name": "影织者", "key_hint": "shadow-weaver"},
-        ]
-        for comp in default_companions:
-            agent = AgentNode(
-                role=AgentRole.COMPANION,
-                name=comp["name"],
-                model="evomap-deepseek-v4-flash",
-            )
-            agent.node_id = f"local_cp_{uuid.uuid4().hex[:8]}"
-            agent.node_secret = f"local_secret_{uuid.uuid4().hex[:12]}"
-            self.add_agent(agent)
-
-        logger.info(f"已创建 {len(self.agents)} 个默认本地 Agent（{dm_key} + {len(default_companions)} companions）")
 
     def _save_agent_to_db(self, agent: AgentNode, key: str) -> None:
         """将 Agent 信息持久化到数据库。"""
@@ -657,10 +560,12 @@ class AgentOrchestrator:
         return results
 
     def create_game_session(self, topic: str, script_name: str) -> dict:
-        """创建游戏 Session（纯本地模式，不依赖 EvoMap）。
+        """创建游戏 Session，邀请所有 Agent 参与。
 
         自动为每个 Agent 从数据库加载历史胶囊，
         作为本局行为的经验参考。
+
+        如果 DM 未注册到 EvoMap（本地模式），则创建本地 Session。
         """
         dm_agents = [a for a in self.agents.values() if a.role == AgentRole.DM]
         companion_agents = [a for a in self.agents.values() if a.role == AgentRole.COMPANION]
@@ -672,6 +577,7 @@ class AgentOrchestrator:
         dm = dm_agents[0]
 
         # ========== 开局加载胶囊 ==========
+        # 为每个 Agent 从数据库加载历史胶囊，作为经验提示
         capsule_map: dict[str, list[dict]] = {}
         capsule_contexts: dict[str, str] = {}
         for key, agent in self.agents.items():
@@ -684,66 +590,68 @@ class AgentOrchestrator:
                         f"Agent {key} 开局加载了 {len(capsules)} 条历史胶囊"
                     )
 
-        # ========== 创建本地 Session（跳过 EvoMap）==========
-        session_id = f"local_session_{uuid.uuid4().hex[:8]}"
-        self.sessions[session_id] = {
-            "topic": topic,
-            "script_name": script_name,
-            "dm": dm.node_id,
-            "companions": [a.node_id for a in companion_agents],
-            "assistant": [a.node_id for a in assistant_agents],
-            "mode": "local",
-            "capsule_count": {
-                k: len(v) for k, v in capsule_map.items()
-            },
-        }
-        for agent in companion_agents:
-            agent.session_id = session_id
+        # ========== 创建 Session ==========
 
-        return {
-            "session_id": session_id,
-            "mode": "local",
-            "capsules_loaded": {k: len(v) for k, v in capsule_map.items()},
-        }
+        # 本地模式
+        if not dm.client:
+            session_id = f"local_session_{uuid.uuid4().hex[:8]}"
+            self.sessions[session_id] = {
+                "topic": topic,
+                "script_name": script_name,
+                "dm": dm.node_id,
+                "companions": [a.node_id for a in companion_agents],
+                "assistant": [a.node_id for a in assistant_agents],
+                "mode": "local",
+                "capsule_count": {
+                    k: len(v) for k, v in capsule_map.items()
+                },
+            }
+            for agent in companion_agents:
+                agent.session_id = session_id
+            return {
+                "session_id": session_id,
+                "mode": "local",
+                "capsules_loaded": {k: len(v) for k, v in capsule_map.items()},
+                "warning": "EvoMap Session 不可用，已创建本地 Session",
+            }
+
+        # EvoMap 模式
+        participants = [a.node_id for a in companion_agents if a.registered]
+        result = dm.client.create_session(
+            topic=f"[剧本杀] {script_name} - {topic}",
+            participants=participants,
+        )
+
+        if "session_id" in result:
+            session_id = result["session_id"]
+            self.sessions[session_id] = {
+                "topic": topic,
+                "script_name": script_name,
+                "dm": dm.node_id,
+                "companions": participants,
+                "assistant": [a.node_id for a in assistant_agents if a.registered],
+                "mode": "evomap",
+                "capsule_count": {k: len(v) for k, v in capsule_map.items()},
+            }
+            for agent in companion_agents:
+                if agent.registered:
+                    agent.session_id = session_id
+
+        # 胶囊上下文挂载到返回结果
+        if isinstance(result, dict):
+            result["capsules_loaded"] = {k: len(v) for k, v in capsule_map.items()}
+            result["capsule_contexts"] = capsule_contexts
+        return result
 
     def broadcast_message(self, session_id: str, msg_type: str,
                           payload: dict, from_role: AgentRole) -> dict:
-        """从指定角色的 Agent 广播消息到 Session（本地模式，不依赖 EvoMap）。"""
+        """从指定角色的 Agent 广播消息到 Session。"""
         agent = self._find_agent_by_role(from_role)
-        if not agent:
-            return {"error": "agent_not_found"}
-        # 本地模式：直接写入 session 记录
-        if session_id in self.sessions:
-            if "messages" not in self.sessions[session_id]:
-                self.sessions[session_id]["messages"] = []
-            self.sessions[session_id]["messages"].append({
-                "msg_type": msg_type,
-                "payload": payload,
-                "from_role": from_role.value,
-                "agent_name": agent.name,
-            })
-            return {"success": True, "mode": "local"}
-        return {"error": "session_not_found"}
-
-    def send_direct_message(self, session_id: str, msg_type: str,
-                            payload: dict, from_key: str, to_key: str) -> dict:
-        """定向消息：从 Agent A 发送到 Agent B（本地模式）。"""
-        from_agent = self.agents.get(from_key)
-        to_agent = self.agents.get(to_key)
-        if not from_agent or not to_agent:
-            return {"error": "agent_not_found"}
-        # 本地模式
-        if session_id in self.sessions:
-            if "direct_messages" not in self.sessions[session_id]:
-                self.sessions[session_id]["direct_messages"] = []
-            self.sessions[session_id]["direct_messages"].append({
-                "msg_type": msg_type,
-                "payload": payload,
-                "from": from_key,
-                "to": to_key,
-            })
-            return {"success": True, "mode": "local"}
-        return {"error": "session_not_found"}
+        if not agent or not agent.client:
+            return {"error": "agent_not_found_or_not_registered"}
+        return agent.client.send_message(
+            session_id=session_id, msg_type=msg_type, payload=payload,
+        )
 
     def dm_generate_hint(self, level: int = 1, context: dict = None) -> dict:
         """让 DM Agent 生成分级提示。
@@ -759,6 +667,18 @@ class AgentOrchestrator:
             return {"success": False, "error": "no_dm_agent"}
         hint = dm.generate_hint(level, context)
         return {"success": True, "hint": hint}
+
+    def send_direct_message(self, session_id: str, msg_type: str,
+                            payload: dict, from_key: str, to_key: str) -> dict:
+        """定向消息：从 Agent A 发送到 Agent B。"""
+        from_agent = self.agents.get(from_key)
+        to_agent = self.agents.get(to_key)
+        if not from_agent or not to_agent or not from_agent.client:
+            return {"error": "agent_not_found"}
+        return from_agent.client.send_message(
+            session_id=session_id, msg_type=msg_type, payload=payload,
+            to_node_id=to_agent.node_id,
+        )
 
     # ============================
     # 后剧情模式
@@ -789,24 +709,12 @@ class AgentOrchestrator:
         killer_agent = None
         dm_agent = self._find_agent_by_role(AgentRole.DM)
 
-        try:
-            from api.agents.game_engine import game_engine
-            game = game_engine.get_game(session_id)
-            if game:
-                for key, state in game.get("agents", {}).items():
-                    char_name = (state.character or {}).get("name", "")
-                    if char_name == accused_killer:
-                        killer_agent = self.agents.get(key)
-                        break
-        except Exception:
-            pass
-
-        if not killer_agent:
-            for key, agent in self.agents.items():
-                if agent.role == AgentRole.COMPANION and agent.registered:
-                    if agent.name == accused_killer or agent.persona_key == accused_killer:
-                        killer_agent = agent
-                        break
+        for key, agent in self.agents.items():
+            if agent.role == AgentRole.COMPANION and agent.registered:
+                # 通过剧本角色名匹配凶手
+                if agent.name == accused_killer or agent.persona_key == accused_killer:
+                    killer_agent = agent
+                    break
 
         # 生成凶手交代（LLM）
         killer_confession = ""

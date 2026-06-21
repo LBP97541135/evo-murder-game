@@ -1546,6 +1546,17 @@ class GameEngine:
             "content": f"[喊话] {question}",
         })
 
+        public_list = game.get("public_evidences") or []
+        if public_list:
+            pub_summary = "；".join(
+                f"【{ev.get('presented_by', '?')} 公开】{ev.get('name', '?')}：{ev.get('description', '')}"
+                for ev in public_list[-6:]
+            )
+            target_state.chat_history.append({
+                "role": "public",
+                "content": f"[喊话语境·已公开证物] {pub_summary}",
+            })
+
         for key, state in game.get("agents", {}).items():
             if key == target_key:
                 continue

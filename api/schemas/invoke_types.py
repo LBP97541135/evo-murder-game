@@ -74,6 +74,7 @@ class InvocationRequest(BaseModel):
     all_actors: List[SafeActor] = []
     chat_messages: List[LLMMessage] = []
     temperature: float = 0.7
+    speech_phase: str = ""  # intro / discussion — 公共发言阶段专用指引
 
 
 class InvocationResponse(BaseModel):
@@ -108,7 +109,7 @@ class GameSessionRequest(BaseModel):
     """创建游戏 Session 请求。"""
     script_id: str = ""
     topic: str = ""
-    player_role_id: str = ""
+    player_character_name: str = ""  # 玩家选择扮演的角色名，为空则使用 is_player 角色
 
 
 class GameSessionResponse(BaseModel):

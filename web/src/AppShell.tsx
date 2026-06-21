@@ -1,7 +1,5 @@
 /**
- * EvoMap Murder Game - App Entry
- *
- * Figma-inspired dark theatre shell.
+ * EvoMap Murder Game - App Entry (指南针助手路由)
  */
 
 import React from "react";
@@ -20,11 +18,11 @@ import { ScriptLibrary } from "./pages/ScriptLibrary";
 import { ScriptDetailPage } from "./pages/ScriptDetailPage";
 import { GamePage } from "./pages/GamePage";
 import { AgentPanel } from "./pages/AgentPanel";
-import { EvolutionTimeline } from "./pages/EvolutionTimeline";
+import { EvolutionTimeline } from "./pages/EvolutionTimeline.compass";
 import { MyGamesPage } from "./pages/MyGamesPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { GenePlazaPage } from "./pages/GenePlazaPage";
-import { ReviewPage } from "./pages/ReviewPage";
+import { ReviewPage } from "./pages/ReviewPage.live";
 import "./styles.css";
 
 const theme = createTheme({
@@ -63,7 +61,7 @@ const theme = createTheme({
   },
 });
 
-function App() {
+function AppShell() {
   return (
     <MantineProvider theme={theme} defaultColorScheme="dark">
       <BrowserRouter>
@@ -92,4 +90,4 @@ function App() {
   );
 }
 
-export default App;
+export default AppShell;

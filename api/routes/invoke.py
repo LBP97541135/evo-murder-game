@@ -11,55 +11,12 @@ from fastapi import APIRouter
 
 from api.schemas.invoke_types import InvocationRequest, InvocationResponse
 from api.llm.llm_service import invoke_with_pipeline, ROLE_SYSTEM_PROMPTS
-from api.agents.game_engine import game_engine, GamePhase, PHASE_CONFIG
+from api.agents.game_engine import game_engine
+from api.agents.game_context import build_game_context_prompt, find_agent_key
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-def _build_game_context_prompt(session_id: str, actor_name: str) -> str:
-    """从 game_engine 读取当前游戏状态，构建环境上下文 prompt 片段。
-
-    注入信息：
-      - 当前游戏阶段及阶段描述
-      - 该 Agent 的压缩记忆和关键事实
-      - 已发现的证物
-      - 全局故事背景
-      - 全局 phase_prompt
-    """
-    game = game_engine.get_game(session_id)
-    if not game:
-        return ""
-
-    phase = game.get("current_phase", "")
-    phase_config = PHASE_CONFIG.get(GamePhase(phase)) if phase else None
-    agent_state = game.get("agents", {}).get(actor_name)
-
-    parts = []
-
-    # 阶段信息
-    if phase_config:
-        parts.append(
-            f"【当前游戏阶段】{phase_config['display_name']}\n{phase_config['description']}\n"
-            f"阶段指引：{phase_config['phase_prompt']}"
-        )
-    else:
-        parts.append(f"【当前游戏阶段】{phase}")
-
-    # Agent 记忆
-    if agent_state:
-        if agent_state.compressed_summary:
-            parts.append(f"【记忆摘要】{agent_state.compressed_summary}")
-        if agent_state.key_facts:
-            parts.append(f"【已确认的关键事实】\n" + "\n".join(f"- {f}" for f in agent_state.key_facts[-5:]))
-        if agent_state.discovered_evidences:
-            ev_lines = []
-            for ev in agent_state.discovered_evidences[-8:]:
-                ev_lines.append(f"- {ev.get('name', '?')}: {ev.get('description', '')}")
-            parts.append("【已发现的证物】\n" + "\n".join(ev_lines))
-
-    return "\n\n".join(parts)
 
 
 @router.post("/", response_model=InvocationResponse)
@@ -82,7 +39,11 @@ async def invoke_ai(req: InvocationRequest):
 
     # 注入游戏环境上下文（如果提供了 session_id）
     if req.session_id:
-        game_context = _build_game_context_prompt(req.session_id, req.actor.name)
+        game_context = build_game_context_prompt(
+            req.session_id,
+            req.actor.name,
+            req.speech_phase or None,
+        )
         if game_context:
             system_prompt += f"\n\n---\n{game_context}"
 
@@ -96,10 +57,12 @@ async def invoke_ai(req: InvocationRequest):
     if req.session_id:
         game = game_engine.get_game(req.session_id)
         if game:
-            agent_state = game.get("agents", {}).get(req.actor.name)
-            if agent_state and agent_state.chat_history:
-                # 只取最近 10 条作为上下文
-                history = agent_state.chat_history[-10:]
+            agent_key = find_agent_key(game, req.actor.name)
+            if agent_key:
+                agent_state = game.get("agents", {}).get(agent_key)
+                if agent_state and agent_state.chat_history:
+                    # 只取最近 10 条作为上下文
+                    history = agent_state.chat_history[-10:]
 
     # Critique 规则——防止剧透和违规
     critique_prompt = (
@@ -150,14 +113,17 @@ def _auto_save_conversation(req: InvocationRequest, result: dict) -> None:
             db_session.add(turn)
             db_session.commit()
 
-            # 同步到 Agent 游戏状态
-            game_engine.add_chat_to_agent(
-                game_id=req.session_id,
-                agent_key=req.actor.name,
-                role=req.actor.name,
-                content=result.get("final", ""),
-            )
-            game_engine.record_chat(game_id=req.session_id)
+            # 同步到 Agent 游戏状态（通过 find_agent_key 匹配正确的编排器 key）
+            game = game_engine.get_game(req.session_id)
+            agent_key = find_agent_key(game, req.actor.name) if game else None
+            if agent_key:
+                game_engine.add_chat_to_agent(
+                    game_id=req.session_id,
+                    agent_key=agent_key,
+                    role=req.actor.name,
+                    content=result.get("final", ""),
+                )
+                game_engine.record_chat(game_id=req.session_id)
         except Exception as db_err:
             logger.warning(f"自动保存对话失败（非致命）: {db_err}")
         finally:

@@ -304,20 +304,37 @@ export const autoMatchPersonas = (scriptGenre: string, difficulty: string) =>
     difficulty,
   });
 
-export const createGameSession = async (scriptId: string, topic: string, playerRoleId = "") => {
+export const createGameSession = async (scriptId: string, topic: string, playerCharacterName?: string) => {
   const result = await post<{ session_id: string; participants: string[]; status: string }>(
     "/game/create-session",
-    { script_id: scriptId, topic, player_role_id: playerRoleId },
+    { script_id: scriptId, topic, player_character_name: playerCharacterName || "" },
   );
   return { sessionId: result.session_id, participants: result.participants, status: result.status };
 };
+export const applyGameCast = (
+  sessionId: string,
+  cast: Array<{ type: string; role: string; agentKey?: string }>,
+  playerCharacterName = "",
+) =>
+  post<{ success: boolean; agents: number }>(`/game/cast/${sessionId}`, {
+    cast,
+    player_character_name: playerCharacterName,
+  });
 export const getGamePhase = (sessionId: string) => get<Record<string, any>>(`/game/phase/${sessionId}`);
-export const getGameSessionInfo = (sessionId: string) => get<Record<string, any>>(`/game/session-info/${sessionId}`);
 export const advanceGamePhase = (sessionId: string) => post<Record<string, any>>(`/game/phase/${sessionId}/advance`);
-export const forceGamePhase = (sessionId: string, phase: string) =>
-  post<Record<string, any>>(`/game/phase/${sessionId}/force`, { phase });
+export const forceGamePhase = (
+  sessionId: string,
+  phase: string,
+  frontendPhaseIndex?: number,
+) =>
+  post<Record<string, any>>(`/game/phase/${sessionId}/force`, {
+    phase,
+    frontend_phase_index: frontendPhaseIndex,
+  });
 export const submitGameVote = (sessionId: string, killer: string, motive: string, voter = "player") =>
   post<Record<string, any>>(`/game/vote/${sessionId}`, { killer, motive, voter });
+export const submitAgentVotes = (sessionId: string) =>
+  post<Record<string, any>>(`/game/vote/${sessionId}/agents`);
 export const broadcastMessage = (
   sessionId: string,
   msgType: string,
@@ -357,6 +374,34 @@ export const recordAgentChat = (sessionId: string, agentKey: string, content: st
     content,
     role,
   });
+export const playerChat = (sessionId: string, content: string, targetKey = "") =>
+  post<{ success: boolean; reply: string; agent_key: string }>(`/game/chat/${sessionId}`, {
+    content,
+    target_key: targetKey,
+  });
+export const sendPrivateChatMessage = (
+  sessionId: string,
+  fromKey: string,
+  toKey: string,
+  content: string,
+) =>
+  post<{ success: boolean; thread_id: string }>(`/game/private-chat/${sessionId}/send`, {
+    from_key: fromKey,
+    to_key: toKey,
+    content,
+  });
+
+// 角色私人剧本（替代前端硬编码 SCRIPT_CHAPTERS）
+export const getMyScript = (sessionId: string, characterName: string) =>
+  get<Record<string, any>>(`/game/my-script/${sessionId}`, { character_name: characterName });
+
+// 游戏状态快照（替代已回退的 /game/snapshot，支持刷新恢复）
+export const getGameSnapshot = (sessionId: string) =>
+  get<Record<string, any>>(`/game/snapshot/${sessionId}`);
+
+// 剧本证物池（替代前端硬编码 SEARCH_EVIDENCE / INITIAL_EVIDENCE）
+export const getEvidencePool = (scriptId: string) =>
+  get<Record<string, any>>(`/scripts/${scriptId}/evidence-pool`);
 
 export const getEvidences = async (
   scriptId: string,
@@ -371,15 +416,35 @@ export const getEvidences = async (
   },
 );
 export const createEvidence = (data: Record<string, any>) => post<Record<string, any>>("/evidence/create", data);
+export const discoverEvidence = (data: {
+  scriptId: string;
+  sessionId: string;
+  scriptEvidenceId: string;
+  discoveredBy?: string;
+}) => post<{ success: boolean; evidence: EvidenceRecord; message: string }>("/evidence/discover", {
+  scriptId: data.scriptId,
+  sessionId: data.sessionId,
+  scriptEvidenceId: data.scriptEvidenceId,
+  discoveredBy: data.discoveredBy || "player",
+});
 export const updateEvidence = (evidenceId: string, data: Record<string, any>) =>
   put<Record<string, any>>(`/evidence/${evidenceId}`, data);
+export interface EvidencePresentationResult {
+  success: boolean;
+  aiResponse: string;
+  reactionType: string;
+  newEvidencesUnlocked: string[];
+  informationUpdated: string[];
+  message: string;
+}
+
 export const presentEvidence = (
   evidenceId: string,
   presentedTo: string,
   presentedBy: string,
   textContent = "",
   presentationContext = "",
-) => post<Record<string, any>>("/evidence/present", {
+) => post<EvidencePresentationResult>("/evidence/present", {
   evidenceId,
   presentedTo,
   presentedBy,
@@ -461,23 +526,38 @@ export const generateCapsuleFromGene = (geneId: string) =>
   post<Record<string, any>>(`/capsules/genes/${geneId}/generate-capsule`);
 export const searchCapsules = (data: Record<string, any>) =>
   post<Array<Record<string, any>>>("/capsules/search", data);
-export const deleteCapsule = (capsuleId: string) =>
-  remove<Record<string, any>>(`/capsules/capsules/${capsuleId}`);
-export const consumeCapsules = (agentRole: string, signals?: string[], limit = 5) =>
-  post<Record<string, any>>("/capsules/consume", { agent_role: agentRole, signals, limit });
-export const reviewAndGenerateCapsules = (sessionId: string, scriptId = "") =>
-  post<Record<string, any>>("/capsules/review-and-generate", {
-    session_id: sessionId,
-    script_id: scriptId,
-  });
 
-export function createSafeActorList(actors: Actor[]): SafeActor[] {
-  return actors.map(({ secret: _secret, violation: _violation, backgroundImage: _background, ...actor }) => actor);
+// ============================
+// 用户画像与个人助手
+// ============================
+
+export interface UserProfile {
+  id: string;
+  display_name: string;
+  level: string;
+  avatar_url: string;
+  preferred_genres: string[];
+  preferred_difficulty: string;
+  preferred_duration: string;
+  tags: string[];
+  profile_data: Record<string, string>;
+  total_games: number;
+  total_hours: number;
+  completed_games: number;
+  favorite_agents: string[];
 }
 
-// ============================
-// 胶囊 API
-// ============================
+export const getUserProfile = (userId = "user_default") =>
+  get<{ success: boolean; profile: UserProfile }>(`/users/profile?user_id=${userId}`);
+
+export const updateUserProfile = (data: Record<string, any>, userId = "user_default") =>
+  post<Record<string, any>>(`/users/profile/update?user_id=${userId}`, data);
+
+export const assistantChat = (message: string, userId = "user_default") =>
+  post<{ reply: string }>(`/users/assistant/chat?user_id=${userId}`, { message });
+
+export const getAssistantHistory = (userId = "user_default") =>
+  get<{ success: boolean; history: Array<{ role: string; content: string }> }>(`/users/assistant/history?user_id=${userId}`);
 
 export interface CapsuleData {
   id: string;
@@ -502,7 +582,9 @@ export interface CapsuleData {
   updatedAt: string;
 }
 
-export const listCapsules = async (params?: {
+export const getCapsule = (capsuleId: string) =>
+  get<CapsuleData>(`/capsules/capsules/${capsuleId}`);
+export const listCapsules = (params?: {
   category?: string;
   publisherRole?: string;
   reviewStatus?: string;
@@ -515,5 +597,16 @@ export const listCapsules = async (params?: {
   if (params?.limit) query.limit = params.limit;
   return get<CapsuleData[]>("/capsules/capsules", query);
 };
+export const deleteCapsule = (capsuleId: string) =>
+  remove<Record<string, any>>(`/capsules/capsules/${capsuleId}`);
+export const consumeCapsules = (agentRole: string, signals?: string[], limit = 5) =>
+  post<Record<string, any>>("/capsules/consume", { agent_role: agentRole, signals, limit });
+export const reviewAndGenerateCapsules = (sessionId: string, scriptId = "") =>
+  post<Record<string, any>>("/capsules/review-and-generate", {
+    session_id: sessionId,
+    script_id: scriptId,
+  });
 
-export const getCapsule = (capsuleId: string) => get<CapsuleData>(`/capsules/capsules/${capsuleId}`);
+export function createSafeActorList(actors: Actor[]): SafeActor[] {
+  return actors.map(({ secret: _secret, violation: _violation, backgroundImage: _background, ...actor }) => actor);
+}

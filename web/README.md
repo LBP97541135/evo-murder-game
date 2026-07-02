@@ -1,36 +1,36 @@
-# web/ 目录 README
+﻿# web/ 鐩綍 README
 
-## 职责
+## 鑱岃矗
 
-`web/` 是进化酒馆的主前端应用，基于 React 18、TypeScript、
-Mantine UI 7、React Router 7 和 Create React App。
+`web/` 鏄繘鍖栭厭棣嗙殑涓诲墠绔簲鐢紝鍩轰簬 React 18銆乀ypeScript銆?
+Mantine UI 7銆丷eact Router 7 鍜?Create React App銆?
 
-当前版本是暗黑工业剧场风格的静态可交互原型，覆盖剧本选择、游戏舞台、
-Agent 阵容和个人助手四条主要用户路径。视觉方向参考 `figma-make/`，
-但主应用继续使用 Mantine，不直接复用参考工程的 Tailwind 和 Radix 组件。
+褰撳墠鐗堟湰鏄殫榛戝伐涓氬墽鍦洪鏍肩殑闈欐€佸彲浜や簰鍘熷瀷锛岃鐩栧墽鏈€夋嫨銆佹父鎴忚垶鍙般€?
+Agent 闃靛鍜屼釜浜哄姪鎵嬪洓鏉′富瑕佺敤鎴疯矾寰勩€傝瑙夋柟鍚戝弬鑰?`figma-make/`锛?
+浣嗕富搴旂敤缁х画浣跨敤 Mantine锛屼笉鐩存帴澶嶇敤鍙傝€冨伐绋嬬殑 Tailwind 鍜?Radix 缁勪欢銆?
 
-## 目录结构
+## 鐩綍缁撴瀯
 
 ```text
 web/
-├── figma-make/             # 独立的 Figma Make/Vite 视觉参考工程
-├── public/                 # CRA 静态资源与 HTML 入口
-├── src/
-│   ├── api/                # 后端 API 调用封装
-│   ├── components/         # 可复用业务组件预留目录
-│   ├── constants/          # 常量预留目录
-│   ├── pages/              # 四个主页面与共享 StudioShell
-│   ├── providers/          # constate 全局状态
-│   ├── types/              # TypeScript 类型
-│   ├── utils/              # 工具函数预留目录
-│   ├── App.tsx             # Mantine 主题、Provider 和路由
-│   ├── index.tsx           # React 入口及 Mantine 基础样式入口
-│   └── styles.css          # 全局字体、背景、卡片和氛围样式
-├── package.json
-└── tsconfig.json
+鈹溾攢鈹€ figma-make/             # 鐙珛鐨?Figma Make/Vite 瑙嗚鍙傝€冨伐绋?
+鈹溾攢鈹€ public/                 # CRA 闈欐€佽祫婧愪笌 HTML 鍏ュ彛
+鈹溾攢鈹€ src/
+鈹?  鈹溾攢鈹€ api/                # 鍚庣 API 璋冪敤灏佽
+鈹?  鈹溾攢鈹€ components/         # 鍙鐢ㄤ笟鍔＄粍浠堕鐣欑洰褰?
+鈹?  鈹溾攢鈹€ constants/          # 甯搁噺棰勭暀鐩綍
+鈹?  鈹溾攢鈹€ pages/              # 鍥涗釜涓婚〉闈笌鍏变韩 StudioShell
+鈹?  鈹溾攢鈹€ providers/          # constate 鍏ㄥ眬鐘舵€?
+鈹?  鈹溾攢鈹€ types/              # TypeScript 绫诲瀷
+鈹?  鈹溾攢鈹€ utils/              # 宸ュ叿鍑芥暟棰勭暀鐩綍
+鈹?  鈹溾攢鈹€ App.tsx             # Mantine 涓婚銆丳rovider 鍜岃矾鐢?
+鈹?  鈹溾攢鈹€ index.tsx           # React 鍏ュ彛鍙?Mantine 鍩虹鏍峰紡鍏ュ彛
+鈹?  鈹斺攢鈹€ styles.css          # 鍏ㄥ眬瀛椾綋銆佽儗鏅€佸崱鐗囧拰姘涘洿鏍峰紡
+鈹溾攢鈹€ package.json
+鈹斺攢鈹€ tsconfig.json
 ```
 
-## 启动与构建
+## 鍚姩涓庢瀯寤?
 
 ```bash
 cd web
@@ -38,91 +38,91 @@ npm install
 npm start
 ```
 
-开发服务器默认地址为 `http://localhost:3000`，前端 API 通过 `package.json`
-的 `proxy` 代理到 `http://localhost:8000`。`npm start` 无需额外环境变量，
-跨平台（Windows/macOS/Linux）直接运行。
+寮€鍙戞湇鍔″櫒榛樿鍦板潃涓?`http://localhost:3000`锛屽墠绔?API 閫氳繃 `package.json`
+鐨?`proxy` 浠ｇ悊鍒?`http://localhost:8000`銆俙npm start` 鏃犻渶棰濆鐜鍙橀噺锛?
+璺ㄥ钩鍙帮紙Windows/macOS/Linux锛夌洿鎺ヨ繍琛屻€?
 
-如需自定义后端地址：
+濡傞渶鑷畾涔夊悗绔湴鍧€锛?
 
 ```bash
 # macOS / Linux
-REACT_APP_API_URL=http://localhost:8000 npm start
+VITE_API_URL=http://localhost:8000 npm start
 
 # Windows PowerShell
-$env:REACT_APP_API_URL="http://localhost:8000"; npm start
+$env:VITE_API_URL="http://localhost:8000"; npm start
 ```
 
-生产构建：
+鐢熶骇鏋勫缓锛?
 
 ```powershell
 cd web
 npm run build
 ```
 
-## 应用入口
+## 搴旂敤鍏ュ彛
 
-- `src/index.tsx` 必须导入 `@mantine/core/styles.css`。缺少该入口时，
-  Mantine 组件只会保留不完整的基础外观。
-- `src/App.tsx` 创建暗色 Mantine 主题，定义红色强调色、正文和标题字体，
-  并挂载 Agent、Script、Session、Mystery 四层 Provider。
-- `src/styles.css` 提供暗色渐变、网格纹理、玻璃背景、工业卡片、
-  Hero 和等宽标签等跨页面样式。
-- 全局字体从 Google Fonts 加载；离线环境会回退到 Georgia 和 monospace。
+- `src/index.tsx` 蹇呴』瀵煎叆 `@mantine/core/styles.css`銆傜己灏戣鍏ュ彛鏃讹紝
+  Mantine 缁勪欢鍙細淇濈暀涓嶅畬鏁寸殑鍩虹澶栬銆?
+- `src/App.tsx` 鍒涘缓鏆楄壊 Mantine 涓婚锛屽畾涔夌孩鑹插己璋冭壊銆佹鏂囧拰鏍囬瀛椾綋锛?
+  骞舵寕杞?Agent銆丼cript銆丼ession銆丮ystery 鍥涘眰 Provider銆?
+- `src/styles.css` 鎻愪緵鏆楄壊娓愬彉銆佺綉鏍肩汗鐞嗐€佺幓鐠冭儗鏅€佸伐涓氬崱鐗囥€?
+  Hero 鍜岀瓑瀹芥爣绛剧瓑璺ㄩ〉闈㈡牱寮忋€?
+- 鍏ㄥ眬瀛椾綋浠?Google Fonts 鍔犺浇锛涚绾跨幆澧冧細鍥為€€鍒?Georgia 鍜?monospace銆?
 
-## 页面路由
+## 椤甸潰璺敱
 
-| 路由 | 页面 | 当前能力 |
+| 璺敱 | 椤甸潰 | 褰撳墠鑳藉姏 |
 |------|------|----------|
-| `/` | 重定向 | 自动跳转到 `/library` |
-| `/library` | 剧本库 | 搜索、题材与难度筛选、推荐流、详情和 Agent 适配 |
-| `/play/:id` | 游戏主界面 | 模式切换、场景舞台、玩家互动、DM 节奏和复盘 |
-| `/agents` | Agent 广场 | 陪玩/DM 切换、搜索筛选、详情、阵容与操作入口 |
-| `/evolution` | 个人助手 | 用户画像、偏好标签、推荐、游玩总结和开局建议 |
+| `/` | 閲嶅畾鍚?| 鑷姩璺宠浆鍒?`/library` |
+| `/library` | 鍓ф湰搴?| 鎼滅储銆侀鏉愪笌闅惧害绛涢€夈€佹帹鑽愭祦銆佽鎯呭拰 Agent 閫傞厤 |
+| `/play/:id` | 娓告垙涓荤晫闈?| 妯″紡鍒囨崲銆佸満鏅垶鍙般€佺帺瀹朵簰鍔ㄣ€丏M 鑺傚鍜屽鐩?|
+| `/agents` | Agent 骞垮満 | 闄帺/DM 鍒囨崲銆佹悳绱㈢瓫閫夈€佽鎯呫€侀樀瀹逛笌鎿嶄綔鍏ュ彛 |
+| `/evolution` | 涓汉鍔╂墜 | 鐢ㄦ埛鐢诲儚銆佸亸濂芥爣绛俱€佹帹鑽愩€佹父鐜╂€荤粨鍜屽紑灞€寤鸿 |
 
-页面细节见 [src/pages/README.md](src/pages/README.md)。
+椤甸潰缁嗚妭瑙?[src/pages/README.md](src/pages/README.md)銆?
 
-## 视觉规范
+## 瑙嗚瑙勮寖
 
-- 背景以黑红、炭灰和旧纸色为主，红色只用于关键状态和主要操作。
-- 标题使用 `Cinzel Decorative`，正文使用 `Crimson Pro`，
-  数据标签使用 `JetBrains Mono`。
-- 页面使用统一的 `StudioShell`、Hero、统计面板和工业卡片。
-- 卡片强调边框、内高光、深阴影和轻度毛玻璃，不使用纯色平铺。
-- 桌面端提供完整顶部导航；窄屏通过页面内导航保持主要路由可达。
+- 鑳屾櫙浠ラ粦绾€佺偔鐏板拰鏃х焊鑹蹭负涓伙紝绾㈣壊鍙敤浜庡叧閿姸鎬佸拰涓昏鎿嶄綔銆?
+- 鏍囬浣跨敤 `Cinzel Decorative`锛屾鏂囦娇鐢?`Crimson Pro`锛?
+  鏁版嵁鏍囩浣跨敤 `JetBrains Mono`銆?
+- 椤甸潰浣跨敤缁熶竴鐨?`StudioShell`銆丠ero銆佺粺璁￠潰鏉垮拰宸ヤ笟鍗＄墖銆?
+- 鍗＄墖寮鸿皟杈规銆佸唴楂樺厜銆佹繁闃村奖鍜岃交搴︽瘺鐜荤拑锛屼笉浣跨敤绾壊骞抽摵銆?
+- 妗岄潰绔彁渚涘畬鏁撮《閮ㄥ鑸紱绐勫睆閫氳繃椤甸潰鍐呭鑸繚鎸佷富瑕佽矾鐢卞彲杈俱€?
 
-## 数据状态
+## 鏁版嵁鐘舵€?
 
-当前四个页面主要使用组件内定义的演示数据，用于验证信息架构和视觉设计。
-`src/api/`、`src/providers/` 和类型层仍然保留，但新版页面尚未全部接入真实 API。
-因此按钮、筛选和面板切换可以交互，注册、匹配、聊天和持久化等业务流程仍需后续对接。
+褰撳墠鍥涗釜椤甸潰涓昏浣跨敤缁勪欢鍐呭畾涔夌殑婕旂ず鏁版嵁锛岀敤浜庨獙璇佷俊鎭灦鏋勫拰瑙嗚璁捐銆?
+`src/api/`銆乣src/providers/` 鍜岀被鍨嬪眰浠嶇劧淇濈暀锛屼絾鏂扮増椤甸潰灏氭湭鍏ㄩ儴鎺ュ叆鐪熷疄 API銆?
+鍥犳鎸夐挳銆佺瓫閫夊拰闈㈡澘鍒囨崲鍙互浜や簰锛屾敞鍐屻€佸尮閰嶃€佽亰澶╁拰鎸佷箙鍖栫瓑涓氬姟娴佺▼浠嶉渶鍚庣画瀵规帴銆?
 
-## 参考工程
+## 鍙傝€冨伐绋?
 
-`figma-make/` 是独立 Vite 工程，只承担视觉参考和设计溯源：
+`figma-make/` 鏄嫭绔?Vite 宸ョ▼锛屽彧鎵挎媴瑙嗚鍙傝€冨拰璁捐婧簮锛?
 
-- 不在 `src/` 内，不会被 CRA 和 TypeScript 主工程扫描。
-- 有自己的 `package.json`、入口、样式和组件依赖。
-- 不应从主应用直接 import 其中的源码。
-- 修改参考工程时，应在 `figma-make/` 内单独安装依赖和运行。
+- 涓嶅湪 `src/` 鍐咃紝涓嶄細琚?CRA 鍜?TypeScript 涓诲伐绋嬫壂鎻忋€?
+- 鏈夎嚜宸辩殑 `package.json`銆佸叆鍙ｃ€佹牱寮忓拰缁勪欢渚濊禆銆?
+- 涓嶅簲浠庝富搴旂敤鐩存帴 import 鍏朵腑鐨勬簮鐮併€?
+- 淇敼鍙傝€冨伐绋嬫椂锛屽簲鍦?`figma-make/` 鍐呭崟鐙畨瑁呬緷璧栧拰杩愯銆?
 
-## 当前进度
+## 褰撳墠杩涘害
 
-- [x] 修复 Mantine 全局样式入口
-- [x] 建立暗黑工业剧场主题和全局样式
-- [x] 建立四个主路由及共享布局壳
-- [x] 完成剧本库静态交互原型
-- [x] 完成游戏舞台静态交互原型
-- [x] 完成 Agent 广场静态交互原型
-- [x] 完成个人助手静态交互原型
-- [x] 将 Figma Make 工程隔离到主应用源码目录之外
-- [x] 增加浏览器兼容目标和 Windows 启动脚本
-- [x] 主应用生产构建通过
-- [ ] 将页面演示数据替换为后端数据
-- [ ] 完成聊天、匹配、收藏、邀请和复盘持久化
-- [ ] 补充页面级测试与移动端视觉回归
+- [x] 淇 Mantine 鍏ㄥ眬鏍峰紡鍏ュ彛
+- [x] 寤虹珛鏆楅粦宸ヤ笟鍓у満涓婚鍜屽叏灞€鏍峰紡
+- [x] 寤虹珛鍥涗釜涓昏矾鐢卞強鍏变韩甯冨眬澹?
+- [x] 瀹屾垚鍓ф湰搴撻潤鎬佷氦浜掑師鍨?
+- [x] 瀹屾垚娓告垙鑸炲彴闈欐€佷氦浜掑師鍨?
+- [x] 瀹屾垚 Agent 骞垮満闈欐€佷氦浜掑師鍨?
+- [x] 瀹屾垚涓汉鍔╂墜闈欐€佷氦浜掑師鍨?
+- [x] 灏?Figma Make 宸ョ▼闅旂鍒颁富搴旂敤婧愮爜鐩綍涔嬪
+- [x] 澧炲姞娴忚鍣ㄥ吋瀹圭洰鏍囧拰 Windows 鍚姩鑴氭湰
+- [x] 涓诲簲鐢ㄧ敓浜ф瀯寤洪€氳繃
+- [ ] 灏嗛〉闈㈡紨绀烘暟鎹浛鎹负鍚庣鏁版嵁
+- [ ] 瀹屾垚鑱婂ぉ銆佸尮閰嶃€佹敹钘忋€侀個璇峰拰澶嶇洏鎸佷箙鍖?
+- [ ] 琛ュ厖椤甸潰绾ф祴璇曚笌绉诲姩绔瑙夊洖褰?
 
-## 已知限制
+## 宸茬煡闄愬埗
 
-- `npm start` 已改为跨平台兼容（直接 `react-scripts start`），不再依赖 Windows 专用语法
-- 外部封面图片和 Google Fonts 需要网络访问
-- `figma-make/` 未安装依赖时无法直接执行 `npm run dev` 或 `npm run build`
+- `npm start` 宸叉敼涓鸿法骞冲彴鍏煎锛堢洿鎺?`react-scripts start`锛夛紝涓嶅啀渚濊禆 Windows 涓撶敤璇硶
+- 澶栭儴灏侀潰鍥剧墖鍜?Google Fonts 闇€瑕佺綉缁滆闂?
+- `figma-make/` 鏈畨瑁呬緷璧栨椂鏃犳硶鐩存帴鎵ц `npm run dev` 鎴?`npm run build`

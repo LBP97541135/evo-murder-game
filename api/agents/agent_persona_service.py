@@ -10,7 +10,8 @@ import uuid
 import logging
 from typing import Optional
 
-from api.db.models import get_session, AgentPersona
+from api.models.agent_persona import AgentPersona
+from api.db.database import get_session
 
 logger = logging.getLogger(__name__)
 

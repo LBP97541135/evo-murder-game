@@ -104,6 +104,24 @@ export interface BackendScript {
   updatedAt: string;
 }
 
+interface ApiEnvelope<T> {
+  success: boolean;
+  data?: T;
+  error?: {
+    code?: string;
+    message?: string;
+    details?: unknown;
+  };
+  message?: string;
+}
+
+function unwrapApiData<T>(payload: ApiEnvelope<T>): T {
+  if (!payload.success || payload.data === undefined) {
+    throw new ApiError(payload.error?.message || payload.message || "请求失败", 0, payload.error);
+  }
+  return payload.data;
+}
+
 export interface AgentInfo {
   key: string;
   name: string;
@@ -265,10 +283,12 @@ export async function invokeAIStream(
   }
 }
 
-export const listScripts = async () =>
-  (await get<{ success: boolean; scripts: BackendScript[] }>("/scripts/list")).scripts;
+export const listScripts = async () => {
+  const payload = await get<ApiEnvelope<{ scripts: BackendScript[] }>>("/scripts");
+  return unwrapApiData(payload).scripts;
+};
 export const getScript = async (scriptId: string) =>
-  (await get<{ success: boolean; script: BackendScript }>(`/scripts/${scriptId}`)).script;
+  unwrapApiData(await get<ApiEnvelope<{ script: BackendScript }>>(`/scripts/${scriptId}`)).script;
 
 export const registerAgent = (
   role: string,
@@ -496,37 +516,6 @@ export const deleteSpoilerStory = (storyId: number) =>
 export const batchDeleteSpoilerStories = (storyIds: number[]) =>
   post<Record<string, any>>("/spoiler-stories/batch-delete", storyIds);
 
-export const recordMemory = (
-  nodeId: string,
-  signals: string[],
-  geneId: string,
-  status: string,
-  score: number,
-  summary: string,
-) => post<Record<string, any>>("/memory/record", {
-  node_id: nodeId,
-  signals,
-  gene_id: geneId,
-  status,
-  score,
-  summary,
-});
-export const recallMemory = (nodeId: string, signals: string[], limit = 5) =>
-  post<Record<string, any>>("/memory/recall", { node_id: nodeId, signals, limit });
-export const memoryStatus = (agentKey: string) =>
-  get<Record<string, any>>(`/memory/status/${agentKey}`);
-
-export const createGene = (data: Record<string, any>) => post<Record<string, any>>("/capsules/genes", data);
-export const getGene = (geneId: string) => get<Record<string, any>>(`/capsules/genes/${geneId}`);
-export const listGenes = (filters: Record<string, QueryValue> = {}) =>
-  get<Array<Record<string, any>>>("/capsules/genes", filters);
-export const reviewGene = (geneId: string, dmNodeId = "") =>
-  post<Record<string, any>>(`/capsules/genes/${geneId}/review`, { dm_node_id: dmNodeId });
-export const generateCapsuleFromGene = (geneId: string) =>
-  post<Record<string, any>>(`/capsules/genes/${geneId}/generate-capsule`);
-export const searchCapsules = (data: Record<string, any>) =>
-  post<Array<Record<string, any>>>("/capsules/search", data);
-
 // ============================
 // 用户画像与个人助手
 // ============================
@@ -558,54 +547,6 @@ export const assistantChat = (message: string, userId = "user_default") =>
 
 export const getAssistantHistory = (userId = "user_default") =>
   get<{ success: boolean; history: Array<{ role: string; content: string }> }>(`/users/assistant/history?user_id=${userId}`);
-
-export interface CapsuleData {
-  id: string;
-  geneId: string;
-  publisherId: string;
-  publisherRole: string;
-  title: string;
-  category: string;
-  signals: string[];
-  applicableRoles: string[];
-  content: string;
-  strategy: string;
-  examples: string;
-  antiPatterns: string;
-  score: number;
-  usageCount: number;
-  effectiveness: number;
-  source: string;
-  reviewStatus: string;
-  reviewedBy: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export const getCapsule = (capsuleId: string) =>
-  get<CapsuleData>(`/capsules/capsules/${capsuleId}`);
-export const listCapsules = (params?: {
-  category?: string;
-  publisherRole?: string;
-  reviewStatus?: string;
-  limit?: number;
-}): Promise<CapsuleData[]> => {
-  const query: Record<string, string | number | boolean | null | undefined> = {};
-  if (params?.category && params.category !== "all") query.category = params.category;
-  if (params?.publisherRole) query.publisher_role = params.publisherRole;
-  if (params?.reviewStatus) query.review_status = params.reviewStatus;
-  if (params?.limit) query.limit = params.limit;
-  return get<CapsuleData[]>("/capsules/capsules", query);
-};
-export const deleteCapsule = (capsuleId: string) =>
-  remove<Record<string, any>>(`/capsules/capsules/${capsuleId}`);
-export const consumeCapsules = (agentRole: string, signals?: string[], limit = 5) =>
-  post<Record<string, any>>("/capsules/consume", { agent_role: agentRole, signals, limit });
-export const reviewAndGenerateCapsules = (sessionId: string, scriptId = "") =>
-  post<Record<string, any>>("/capsules/review-and-generate", {
-    session_id: sessionId,
-    script_id: scriptId,
-  });
 
 export function createSafeActorList(actors: Actor[]): SafeActor[] {
   return actors.map(({ secret: _secret, violation: _violation, backgroundImage: _background, ...actor }) => actor);

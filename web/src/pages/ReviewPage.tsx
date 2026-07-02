@@ -3,7 +3,7 @@
  *
  * 两个 Tab：
  *   1. 圆桌评分看板 — 1:1 复刻游戏选角圆桌，DM 居中，角色环绕，综合评分+维度详情
- *   2. 基因胶囊面板 — 局后经验提炼为可复用胶囊的展示面板
+ *   2. 经验技能面板 — 局后经验提炼为可复用技能的展示面板
  */
 
 import React from "react";
@@ -43,7 +43,7 @@ import {
 } from "@tabler/icons-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
-import { GAME_PLAYERS } from "./gameMockData";
+import { GAME_PLAYERS } from "../constants/gameData";
 import { scripts } from "./scriptData";
 import { buildPlayPath, getStoredGameSession } from "../utils/gameNavigation";
 
@@ -145,10 +145,10 @@ const MOCK_REVIEWS: PlayerReview[] = [
 ];
 
 // ============================
-// 模拟基因胶囊数据
+// 模拟经验技能数据
 // ============================
 
-interface GeneCapsule {
+interface SkillItem {
   id: string;
   title: string;
   category: "reasoning" | "role-playing" | "hosting" | "collaboration" | "strategy";
@@ -163,9 +163,9 @@ interface GeneCapsule {
   createdAt: string;
 }
 
-const MOCK_CAPSULES: GeneCapsule[] = [
+const MOCK_SKILLS: SkillItem[] = [
   {
-    id: "capsule_001",
+    id: "skill_001",
     title: "沉默型玩家的引导策略",
     category: "hosting",
     categoryLabel: "主持技巧",
@@ -179,7 +179,7 @@ const MOCK_CAPSULES: GeneCapsule[] = [
     createdAt: "2026-06-15",
   },
   {
-    id: "capsule_002",
+    id: "skill_002",
     title: "时间线矛盾的定位方法",
     category: "reasoning",
     categoryLabel: "推理技巧",
@@ -193,7 +193,7 @@ const MOCK_CAPSULES: GeneCapsule[] = [
     createdAt: "2026-06-14",
   },
   {
-    id: "capsule_003",
+    id: "skill_003",
     title: "情感角色的沉浸推进法",
     category: "role-playing",
     categoryLabel: "角色扮演",
@@ -207,7 +207,7 @@ const MOCK_CAPSULES: GeneCapsule[] = [
     createdAt: "2026-06-13",
   },
   {
-    id: "capsule_004",
+    id: "skill_004",
     title: "对抗型玩家的边界管理",
     category: "collaboration",
     categoryLabel: "协作技巧",
@@ -221,7 +221,7 @@ const MOCK_CAPSULES: GeneCapsule[] = [
     createdAt: "2026-06-12",
   },
   {
-    id: "capsule_005",
+    id: "skill_005",
     title: "新手局的节奏控制",
     category: "hosting",
     categoryLabel: "主持技巧",
@@ -235,7 +235,7 @@ const MOCK_CAPSULES: GeneCapsule[] = [
     createdAt: "2026-06-11",
   },
   {
-    id: "capsule_006",
+    id: "skill_006",
     title: "证据链的闭环验证",
     category: "reasoning",
     categoryLabel: "推理技巧",
@@ -308,7 +308,7 @@ export function ReviewPage() {
 
   const [reviewTab, setReviewTab] = React.useState<string | null>("table");
   const [selectedPlayerId, setSelectedPlayerId] = React.useState<string | null>(null);
-  const [selectedCapsule, setSelectedCapsule] = React.useState<GeneCapsule | null>(null);
+  const [selectedSkill, setSelectedSkill] = React.useState<SkillItem | null>(null);
 
   const gamePlayers = React.useMemo(() => GAME_PLAYERS.filter((p) => p.id !== "dm"), []);
   const dmPlayer = React.useMemo(() => GAME_PLAYERS.find((p) => p.id === "dm"), []);
@@ -385,8 +385,8 @@ export function ReviewPage() {
             <Tabs.Tab value="table" leftSection={<IconUsers size={16} />}>
               圆桌评分看板
             </Tabs.Tab>
-            <Tabs.Tab value="capsules" leftSection={<IconDna size={16} />}>
-              基因胶囊面板
+            <Tabs.Tab value="skills" leftSection={<IconDna size={16} />}>
+              经验技能面板
             </Tabs.Tab>
           </Tabs.List>
 
@@ -528,8 +528,8 @@ export function ReviewPage() {
             </Paper>
           </Tabs.Panel>
 
-          {/* ==================== Tab 2：基因胶囊面板 ==================== */}
-          <Tabs.Panel value="capsules" pt="md">
+          {/* ==================== Tab 2：经验技能面板 ==================== */}
+          <Tabs.Panel value="skills" pt="md">
             <Paper radius="xl" className="industrial-card" p="xl">
               <Stack gap="lg">
                 <Group justify="space-between">
@@ -537,54 +537,54 @@ export function ReviewPage() {
                     <Group gap="xs">
                       <IconDna size={18} color="#fbbf24" />
                       <Text className="monospace-label" size="xs" c="yellow.3">
-                        gene capsule dashboard
+                        experience skill dashboard
                       </Text>
                     </Group>
-                    <Title order={3} mt={4}>基因胶囊 · 经验可视化</Title>
+                    <Title order={3} mt={4}>经验技能 · 经验可视化</Title>
                     <Text size="sm" c="dimmed" mt={4}>
-                      每局结束后，Agent 生成原始经验（Gene）→ DM 评审打分 → 高质量经验提炼为普适胶囊，可在新局中复用。
+                      每局结束后，Agent 生成原始经验（Experience）→ DM 评审打分 → 高质量经验提炼为普适技能，可在新局中复用。
                     </Text>
                   </Box>
                   <Badge color="yellow" variant="light" size="lg">
-                    {MOCK_CAPSULES.length} 个胶囊
+                    {MOCK_SKILLS.length} 个技能
                   </Badge>
                 </Group>
 
                 <Box className="agent-masonry">
-                  {MOCK_CAPSULES.map((capsule) => (
-                    <Box key={capsule.id} className="agent-masonry__item">
+                  {MOCK_SKILLS.map((skill) => (
+                    <Box key={skill.id} className="agent-masonry__item">
                       <Card
                         radius="lg"
                         className="tone-panel"
                         p="md"
                         style={{ cursor: "pointer" }}
-                        onClick={() => setSelectedCapsule(capsule)}
+                        onClick={() => setSelectedSkill(skill)}
                       >
                         <Stack gap="sm" h="100%">
                           <Group justify="space-between">
                             <Badge
                               size="sm"
                               variant="filled"
-                              color={CATEGORY_COLORS[capsule.category] || "gray"}
-                              leftSection={CATEGORY_ICONS[capsule.category]}
+                              color={CATEGORY_COLORS[skill.category] || "gray"}
+                              leftSection={CATEGORY_ICONS[skill.category]}
                             >
-                              {capsule.categoryLabel}
+                              {skill.categoryLabel}
                             </Badge>
-                            <Badge size="sm" variant="light" color={getScoreColor(capsule.score * 100)}>
-                              {capsule.score.toFixed(2)}
+                            <Badge size="sm" variant="light" color={getScoreColor(skill.score * 100)}>
+                              {skill.score.toFixed(2)}
                             </Badge>
                           </Group>
 
                           <Text fw={700} size="sm" lh={1.4}>
-                            {capsule.title}
+                            {skill.title}
                           </Text>
 
                           <Text size="xs" c="dimmed" lh={1.6} lineClamp={3} style={{ flex: 1 }}>
-                            {capsule.content}
+                            {skill.content}
                           </Text>
 
                           <Group gap={4}>
-                            {capsule.signals.slice(0, 3).map((tag) => (
+                            {skill.signals.slice(0, 3).map((tag) => (
                               <Badge key={tag} size="xs" variant="outline" color="gray">
                                 {tag}
                               </Badge>
@@ -593,7 +593,7 @@ export function ReviewPage() {
 
                           <Group justify="space-between">
                             <Text size="xs" c="dimmed">
-                              {capsule.publisherName} · 已用 {capsule.usageCount} 次
+                              {skill.publisherName} · 已用 {skill.usageCount} 次
                             </Text>
                             <IconEye size={14} style={{ opacity: 0.4 }} />
                           </Group>
@@ -689,60 +689,60 @@ export function ReviewPage() {
         )}
       </Modal>
 
-      {/* ==================== 弹窗：胶囊详情 ==================== */}
+      {/* ==================== 弹窗：技能详情 ==================== */}
       <Modal
-        opened={!!selectedCapsule}
-        onClose={() => setSelectedCapsule(null)}
+        opened={!!selectedSkill}
+        onClose={() => setSelectedSkill(null)}
         title={null}
         radius="xl"
         size="md"
         overlayProps={{ backgroundOpacity: 0.5, blur: 4 }}
       >
-        {selectedCapsule && (
+        {selectedSkill && (
           <Paper radius="xl" className="industrial-card" p="lg">
             <Stack gap="md">
               <Group justify="space-between">
                 <Badge
                   variant="filled"
-                  color={CATEGORY_COLORS[selectedCapsule.category] || "gray"}
-                  leftSection={CATEGORY_ICONS[selectedCapsule.category]}
+                  color={CATEGORY_COLORS[selectedSkill.category] || "gray"}
+                  leftSection={CATEGORY_ICONS[selectedSkill.category]}
                 >
-                  {selectedCapsule.categoryLabel}
+                  {selectedSkill.categoryLabel}
                 </Badge>
-                <Badge variant="light" color={getScoreColor(selectedCapsule.score * 100)}>
-                  评分 {selectedCapsule.score.toFixed(2)}
+                <Badge variant="light" color={getScoreColor(selectedSkill.score * 100)}>
+                  评分 {selectedSkill.score.toFixed(2)}
                 </Badge>
               </Group>
 
-              <Title order={3}>{selectedCapsule.title}</Title>
+              <Title order={3}>{selectedSkill.title}</Title>
 
               <Text size="sm" c="dimmed">
-                发布者：{selectedCapsule.publisherName}（{selectedCapsule.publisherRole === "dm" ? "DM" : "陪玩 Agent"}）
+                发布者：{selectedSkill.publisherName}（{selectedSkill.publisherRole === "dm" ? "DM" : "陪玩 Agent"}）
               </Text>
 
               <Card radius="lg" className="ambient-grid" p="md">
                 <Text fw={700} size="sm" mb="sm">经验内容</Text>
-                <Text size="sm" c="dimmed" lh={1.7}>{selectedCapsule.content}</Text>
+                <Text size="sm" c="dimmed" lh={1.7}>{selectedSkill.content}</Text>
               </Card>
 
-              {selectedCapsule.strategy && (
+              {selectedSkill.strategy && (
                 <Card radius="lg" className="ambient-grid" p="md">
                   <Text fw={700} size="sm" mb="sm">策略方法</Text>
                   <Text size="sm" c="dimmed" lh={1.7} style={{ whiteSpace: "pre-wrap" }}>
-                    {selectedCapsule.strategy}
+                    {selectedSkill.strategy}
                   </Text>
                 </Card>
               )}
 
               <Group gap={4}>
-                {selectedCapsule.signals.map((tag) => (
+                {selectedSkill.signals.map((tag) => (
                   <Badge key={tag} size="xs" variant="light" color="gray">{tag}</Badge>
                 ))}
               </Group>
 
               <Group justify="space-between">
-                <Text size="xs" c="dimmed">创建于 {selectedCapsule.createdAt}</Text>
-                <Text size="xs" c="dimmed">已使用 {selectedCapsule.usageCount} 次</Text>
+                <Text size="xs" c="dimmed">创建于 {selectedSkill.createdAt}</Text>
+                <Text size="xs" c="dimmed">已使用 {selectedSkill.usageCount} 次</Text>
               </Group>
             </Stack>
           </Paper>

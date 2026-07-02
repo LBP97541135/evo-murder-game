@@ -2,7 +2,7 @@
 EvoMap Murder Game - FastAPI Main Entry Point
 
 应用初始化、中间件配置、路由挂载。
-具体路由定义在 api/routes/ 下各模块中。
+具体路由定义在 api/routers/ 下各模块中。
 """
 
 import logging
@@ -11,9 +11,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
-from api.config.settings import DEBUG
-from api.db.models import init_db
-from api.orchestrator import orchestrator
+from api.config.settings import DEBUG, CORS_ORIGINS
+from api.db.base import Base
+from api.db.database import initialize as init_db
 
 logger = logging.getLogger(__name__)
 
@@ -21,15 +21,15 @@ logger = logging.getLogger(__name__)
 # App Init
 # ============================
 app = FastAPI(
-    title="EvoMap Murder Game",
-    description="多Agent自进化剧本杀系统 - 基于 EvoMap GEP-A2A 协议",
+    title="AI Murder Game",
+    description="AI剧本杀游戏系统 - EvoMap 为可选集成",
     version="2.0.0",
     debug=DEBUG,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"] if DEBUG else CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -47,28 +47,26 @@ if static_dir.exists():
 # ============================
 # 挂载路由
 # ============================
-from api.routes.health import router as health_router
-from api.routes.agents import router as agents_router
-from api.routes.invoke import router as invoke_router
-from api.routes.invoke_stream import router as invoke_stream_router
-from api.routes.game import router as game_router
-from api.routes.memory import router as memory_router
-from api.routes.scripts import router as scripts_router
-from api.routes.evidence import router as evidence_router
-from api.routes.spoiler_stories import router as spoiler_router
-from api.routes.conversations import router as conversations_router
-from api.routes.capsules import router as capsules_router
-from api.routes.users import router as users_router
+from api.routers.health import router as health_router
+from api.routers.sessions import router as sessions_router
+from api.routers.phases import router as phases_router
+from api.routers.evidences import router as evidences_router
+from api.routers.conversations import router as conversations_router
+from api.routers.agents import router as agents_router
+from api.routers.reviews import router as reviews_router
+from api.routers.skills import router as skills_router
+from api.routers.casting import router as casting_router
+from api.routers.scripts import router as scripts_router
+from api.routers.users import router as users_router
 
 app.include_router(health_router)
-app.include_router(agents_router, prefix="/agents", tags=["agents"])
-app.include_router(invoke_router, prefix="/invoke", tags=["invoke"])
-app.include_router(invoke_stream_router, prefix="/invoke", tags=["invoke_stream"])
-app.include_router(game_router, prefix="/game", tags=["game"])
-app.include_router(memory_router, prefix="/memory", tags=["memory"])
-app.include_router(scripts_router, prefix="/scripts", tags=["scripts"])
-app.include_router(evidence_router, prefix="/evidence", tags=["evidence"])
-app.include_router(spoiler_router, prefix="/spoiler-stories", tags=["spoiler_stories"])
-app.include_router(conversations_router, prefix="/conversations", tags=["conversations"])
-app.include_router(capsules_router, prefix="/capsules", tags=["capsules"])
-app.include_router(users_router, prefix="/users", tags=["users"])
+app.include_router(sessions_router)
+app.include_router(phases_router)
+app.include_router(evidences_router)
+app.include_router(conversations_router)
+app.include_router(agents_router)
+app.include_router(reviews_router)
+app.include_router(skills_router)
+app.include_router(casting_router)
+app.include_router(scripts_router)
+app.include_router(users_router)

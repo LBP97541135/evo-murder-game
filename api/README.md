@@ -1,93 +1,93 @@
-# api/ · README
+﻿# api/ 路 README
 
-## 职责
-后端 API 服务，基于 Python FastAPI。
-负责所有后端逻辑：Agent 管理、EvoMap 通信、LLM 推理、游戏 Session、数据持久化、剧本管理、证物系统、剧透故事。
+## 鑱岃矗
+鍚庣 API 鏈嶅姟锛屽熀浜?Python FastAPI銆?
+璐熻矗鎵€鏈夊悗绔€昏緫锛欰gent 绠＄悊銆丒voMap 閫氫俊銆丩LM 鎺ㄧ悊銆佹父鎴?Session銆佹暟鎹寔涔呭寲銆佸墽鏈鐞嗐€佽瘉鐗╃郴缁熴€佸墽閫忔晠浜嬨€?
 
-## 本地运行
+## 鏈湴杩愯
 
-以下命令均需要在项目根目录执行，即包含 `api/`、`web/` 和 `data/` 的目录。
+浠ヤ笅鍛戒护鍧囬渶瑕佸湪椤圭洰鏍圭洰褰曟墽琛岋紝鍗冲寘鍚?`api/`銆乣web/` 鍜?`data/` 鐨勭洰褰曘€?
 
-### 1. 环境要求
+### 1. 鐜瑕佹眰
 
-- Python 3.10 及以上，推荐 Python 3.11。
-- 默认使用 SQLite，无需单独安装数据库。
-- 如果需要调用 AI 推理接口，需要准备对应 Provider 的 API Key，或者运行本地 Ollama。
+- Python 3.10 鍙婁互涓婏紝鎺ㄨ崘 Python 3.11銆?
+- 榛樿浣跨敤 SQLite锛屾棤闇€鍗曠嫭瀹夎鏁版嵁搴撱€?
+- 濡傛灉闇€瑕佽皟鐢?AI 鎺ㄧ悊鎺ュ彛锛岄渶瑕佸噯澶囧搴?Provider 鐨?API Key锛屾垨鑰呰繍琛屾湰鍦?Ollama銆?
 
-### 2. 创建虚拟环境
+### 2. 鍒涘缓铏氭嫙鐜
 
-Windows PowerShell：
+Windows PowerShell锛?
 
 ```powershell
 py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
-如果 PowerShell 禁止执行激活脚本，可以不激活环境，后续直接使用：
+濡傛灉 PowerShell 绂佹鎵ц婵€娲昏剼鏈紝鍙互涓嶆縺娲荤幆澧冿紝鍚庣画鐩存帴浣跨敤锛?
 
 ```powershell
 .\.venv\Scripts\python.exe
 ```
 
-macOS / Linux：
+macOS / Linux锛?
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-### 3. 安装依赖
+### 3. 瀹夎渚濊禆
 
-开发环境建议安装可更新的依赖清单：
+寮€鍙戠幆澧冨缓璁畨瑁呭彲鏇存柊鐨勪緷璧栨竻鍗曪細
 
 ```powershell
 python -m pip install --upgrade pip
 python -m pip install -r api/requirements.txt
 ```
 
-需要严格复现当前开发环境时，使用锁定版本：
+闇€瑕佷弗鏍煎鐜板綋鍓嶅紑鍙戠幆澧冩椂锛屼娇鐢ㄩ攣瀹氱増鏈細
 
 ```powershell
 python -m pip install -r api/requirements-lock.txt
 ```
 
-未激活 Windows 虚拟环境时：
+鏈縺娲?Windows 铏氭嫙鐜鏃讹細
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r api/requirements.txt
 ```
 
-### 4. 配置环境变量
+### 4. 閰嶇疆鐜鍙橀噺
 
-在项目根目录创建 `.env`。`api/config/settings.py` 使用 `load_dotenv()`，
-因此从项目根目录启动时读取的是根目录下的 `.env`。
+鍦ㄩ」鐩牴鐩綍鍒涘缓 `.env`銆俙api/config/settings.py` 浣跨敤 `load_dotenv()`锛?
+鍥犳浠庨」鐩牴鐩綍鍚姩鏃惰鍙栫殑鏄牴鐩綍涓嬬殑 `.env`銆?
 
-最小配置示例：
+鏈€灏忛厤缃ず渚嬶細
 
 ```dotenv
-# AI Provider：openai / anthropic / groq / openrouter / ollama
+# AI Provider锛歰penai / anthropic / groq / openrouter / ollama
 INFERENCE_SERVICE=openai
 MODEL=evomap-gemini-3.1-pro-preview
-API_KEY=替换为实际密钥
+API_KEY=鏇挎崲涓哄疄闄呭瘑閽?
 OPENAI_API_BASE=https://api.evomap.ai/v1
 MAX_TOKENS=8192
 
-# EvoMap；暂时不使用远程节点时可以留空
+# EvoMap锛涙殏鏃朵笉浣跨敤杩滅▼鑺傜偣鏃跺彲浠ョ暀绌?
 EVOMAP_HUB_URL=https://evomap.ai
 EVOMAP_NODE_ID=
 EVOMAP_NODE_SECRET=
 
-# 数据库；DB_CONN_URL 留空时使用 SQLite
+# 鏁版嵁搴擄紱DB_CONN_URL 鐣欑┖鏃朵娇鐢?SQLite
 DB_CONN_URL=
 SQLITE_PATH=data/murder_mystery.db
 
 DEBUG=true
 ```
 
-只测试健康检查、剧本读取等不触发 LLM 的接口时，`API_KEY` 可以暂时留空。
-调用 `/invoke`、流式 AI、Agent 意图生成等接口时必须配置可用的模型服务。
+鍙祴璇曞仴搴锋鏌ャ€佸墽鏈鍙栫瓑涓嶈Е鍙?LLM 鐨勬帴鍙ｆ椂锛宍API_KEY` 鍙互鏆傛椂鐣欑┖銆?
+璋冪敤 `/invoke`銆佹祦寮?AI銆丄gent 鎰忓浘鐢熸垚绛夋帴鍙ｆ椂蹇呴』閰嶇疆鍙敤鐨勬ā鍨嬫湇鍔°€?
 
-使用本地 Ollama 的示例：
+浣跨敤鏈湴 Ollama 鐨勭ず渚嬶細
 
 ```dotenv
 INFERENCE_SERVICE=ollama
@@ -96,58 +96,58 @@ OLLAMA_URL=http://localhost:11434
 API_KEY=
 ```
 
-使用 PostgreSQL 时设置：
+浣跨敤 PostgreSQL 鏃惰缃細
 
 ```dotenv
-DB_CONN_URL=postgresql+psycopg://用户名:密码@localhost:5432/数据库名
+DB_CONN_URL=postgresql+psycopg://鐢ㄦ埛鍚?瀵嗙爜@localhost:5432/鏁版嵁搴撳悕
 ```
 
-### 5. 启动后端
+### 5. 鍚姩鍚庣
 
-推荐从项目根目录启动：
+鎺ㄨ崘浠庨」鐩牴鐩綍鍚姩锛?
 
 ```powershell
 python -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-未激活 Windows 虚拟环境时：
+鏈縺娲?Windows 铏氭嫙鐜鏃讹細
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-macOS / Linux 命令相同：
+macOS / Linux 鍛戒护鐩稿悓锛?
 
 ```bash
 python -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-不要进入 `api/` 目录后执行 `uvicorn main:app`，项目内部使用 `api.*`
-绝对导入，从项目根目录以 `api.main:app` 启动最稳定。
+涓嶈杩涘叆 `api/` 鐩綍鍚庢墽琛?`uvicorn main:app`锛岄」鐩唴閮ㄤ娇鐢?`api.*`
+缁濆瀵煎叆锛屼粠椤圭洰鏍圭洰褰曚互 `api.main:app` 鍚姩鏈€绋冲畾銆?
 
-### 6. 验证服务
+### 6. 楠岃瘉鏈嶅姟
 
-启动成功后访问：
+鍚姩鎴愬姛鍚庤闂細
 
-- 健康检查：<http://localhost:8000/health>
-- Swagger API 文档：<http://localhost:8000/docs>
-- OpenAPI JSON：<http://localhost:8000/openapi.json>
+- 鍋ュ悍妫€鏌ワ細<http://localhost:8000/health>
+- Swagger API 鏂囨。锛?http://localhost:8000/docs>
+- OpenAPI JSON锛?http://localhost:8000/openapi.json>
 
-PowerShell 验证命令：
+PowerShell 楠岃瘉鍛戒护锛?
 
 ```powershell
 Invoke-RestMethod http://localhost:8000/health
 ```
 
-或者：
+鎴栬€咃細
 
 ```powershell
 curl.exe http://localhost:8000/health
 ```
 
-### 7. 同时启动前端
+### 7. 鍚屾椂鍚姩鍓嶇
 
-另开一个终端：
+鍙﹀紑涓€涓粓绔細
 
 ```bash
 cd web
@@ -155,129 +155,129 @@ npm install
 npm start
 ```
 
-前端默认连接 `http://localhost:8000`（通过 `package.json` 的 `proxy` 配置）。
-`npm start` 已改为跨平台兼容，无需设置环境变量即可在 Windows/macOS/Linux 运行。
+鍓嶇榛樿杩炴帴 `http://localhost:8000`锛堥€氳繃 `package.json` 鐨?`proxy` 閰嶇疆锛夈€?
+`npm start` 宸叉敼涓鸿法骞冲彴鍏煎锛屾棤闇€璁剧疆鐜鍙橀噺鍗冲彲鍦?Windows/macOS/Linux 杩愯銆?
 
-如需自定义后端地址：
+濡傞渶鑷畾涔夊悗绔湴鍧€锛?
 
 ```bash
 # macOS / Linux
-REACT_APP_API_URL=http://localhost:8000 npm start
+VITE_API_URL=http://localhost:8000 npm start
 
 # Windows PowerShell
-$env:REACT_APP_API_URL="http://localhost:8000"; npm start
+$env:VITE_API_URL="http://localhost:8000"; npm start
 ```
 
-### 常见问题
+### 甯歌闂
 
 #### `ModuleNotFoundError: No module named 'api'`
 
-确认当前目录是项目根目录，并使用：
+纭褰撳墠鐩綍鏄」鐩牴鐩綍锛屽苟浣跨敤锛?
 
 ```powershell
 python -m uvicorn api.main:app --reload --port 8000
 ```
 
-#### PowerShell 无法运行 `Activate.ps1`
+#### PowerShell 鏃犳硶杩愯 `Activate.ps1`
 
-无需修改系统执行策略，可以直接使用虚拟环境中的 Python：
+鏃犻渶淇敼绯荤粺鎵ц绛栫暐锛屽彲浠ョ洿鎺ヤ娇鐢ㄨ櫄鎷熺幆澧冧腑鐨?Python锛?
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn api.main:app --reload --port 8000
 ```
 
-#### SQLite 报 `unable to open database file`
+#### SQLite 鎶?`unable to open database file`
 
-确认从项目根目录启动，并且根目录下存在 `data/`。默认数据库文件为：
+纭浠庨」鐩牴鐩綍鍚姩锛屽苟涓旀牴鐩綍涓嬪瓨鍦?`data/`銆傞粯璁ゆ暟鎹簱鏂囦欢涓猴細
 
 ```text
 data/murder_mystery.db
 ```
 
-#### `/game/create-session` 返回 `No agents registered yet`
+#### `/game/create-session` 杩斿洖 `No agents registered yet`
 
-创建游戏 Session 前，后端编排器中至少需要一个已注册 Agent。可以先通过
-Swagger 调用 `POST /agents/register`。如果只开发页面，前端会降级为本地游戏模式。
+鍒涘缓娓告垙 Session 鍓嶏紝鍚庣缂栨帓鍣ㄤ腑鑷冲皯闇€瑕佷竴涓凡娉ㄥ唽 Agent銆傚彲浠ュ厛閫氳繃
+Swagger 璋冪敤 `POST /agents/register`銆傚鏋滃彧寮€鍙戦〉闈紝鍓嶇浼氶檷绾т负鏈湴娓告垙妯″紡銆?
 
-#### AI 接口返回认证或模型错误
+#### AI 鎺ュ彛杩斿洖璁よ瘉鎴栨ā鍨嬮敊璇?
 
-检查 `.env` 中的 `INFERENCE_SERVICE`、`MODEL`、`API_KEY` 和对应 API Base。
-修改 `.env` 后需要重启后端进程。
+妫€鏌?`.env` 涓殑 `INFERENCE_SERVICE`銆乣MODEL`銆乣API_KEY` 鍜屽搴?API Base銆?
+淇敼 `.env` 鍚庨渶瑕侀噸鍚悗绔繘绋嬨€?
 
-## 目录结构
+## 鐩綍缁撴瀯
 
 ```
 api/
-├── main.py                 ← FastAPI 入口，app初始化 + 路由挂载
-├── requirements.txt        ← Python 依赖清单
-├── __init__.py             ← 包标记
-│
-├── config/                 ← 配置管理
-│   ├── settings.py         ← .env读取，所有配置变量
-│   └── README.md
-│
-├── evomap/                 ← EvoMap A2A Protocol 客户端
-│   ├── evomap_client.py    ← 全端点封装（30+方法）
-│   ├── __init__.py
-│   └── README.md
-│
-├── agents/                 ← 多Agent编排系统
-│   ├── agent_orchestrator.py ← AgentNode + Orchestrator + 角色模板
-│   ├── __init__.py
-│   └── README.md
-│
-├── llm/                    ← LLM 推理服务
-│   ├── llm_service.py      ← 三层管道 + 5个Provider + 角色Prompt
-│   ├── __init__.py
-│   └── README.md
-│
-├── schemas/                ← Pydantic 数据模型
-│   ├── invoke_types.py     ← 所有请求/响应模型 + SafeActor
-│   ├── __init__.py
-│   └── README.md
-│
-├── db/                     ← 数据持久化
-│   ├── models.py           ← SQLAlchemy ORM 模型（15个表 + 转换函数）
-│   ├── database.py         ← 连接引擎 + 初始化 + Session
-│   ├── __init__.py
-│   └── README.md
-│
-├── routes/                 ← FastAPI 路由定义
-│   ├── health.py           ← /health 健康检查
-│   ├── agents.py           ← /agents 注册/列表/心跳/进化
-│   ├── invoke.py           ← /invoke AI三层管道
-│   ├── game.py             ← /game Session/广播/复盘
-│   ├── memory.py           ← /memory 记录/召回/状态
-│   ├── scripts.py          ← /scripts 剧本CRUD（保存/列表/详情/删除）
-│   ├── evidence.py         ← /evidence 证物系统（创建/查询/出示/组合/进度）
-│   ├── spoiler_stories.py  ← /spoiler-stories 剧透故事管理
-│   ├── __init__.py
-│   └── README.md
-│
-└── README.md               ← 本文件
+鈹溾攢鈹€ main.py                 鈫?FastAPI 鍏ュ彛锛宎pp鍒濆鍖?+ 璺敱鎸傝浇
+鈹溾攢鈹€ requirements.txt        鈫?Python 渚濊禆娓呭崟
+鈹溾攢鈹€ __init__.py             鈫?鍖呮爣璁?
+鈹?
+鈹溾攢鈹€ config/                 鈫?閰嶇疆绠＄悊
+鈹?  鈹溾攢鈹€ settings.py         鈫?.env璇诲彇锛屾墍鏈夐厤缃彉閲?
+鈹?  鈹斺攢鈹€ README.md
+鈹?
+鈹溾攢鈹€ evomap/                 鈫?EvoMap A2A Protocol 瀹㈡埛绔?
+鈹?  鈹溾攢鈹€ evomap_client.py    鈫?鍏ㄧ鐐瑰皝瑁咃紙30+鏂规硶锛?
+鈹?  鈹溾攢鈹€ __init__.py
+鈹?  鈹斺攢鈹€ README.md
+鈹?
+鈹溾攢鈹€ agents/                 鈫?澶欰gent缂栨帓绯荤粺
+鈹?  鈹溾攢鈹€ agent_orchestrator.py 鈫?AgentNode + Orchestrator + 瑙掕壊妯℃澘
+鈹?  鈹溾攢鈹€ __init__.py
+鈹?  鈹斺攢鈹€ README.md
+鈹?
+鈹溾攢鈹€ llm/                    鈫?LLM 鎺ㄧ悊鏈嶅姟
+鈹?  鈹溾攢鈹€ llm_service.py      鈫?涓夊眰绠￠亾 + 5涓狿rovider + 瑙掕壊Prompt
+鈹?  鈹溾攢鈹€ __init__.py
+鈹?  鈹斺攢鈹€ README.md
+鈹?
+鈹溾攢鈹€ schemas/                鈫?Pydantic 鏁版嵁妯″瀷
+鈹?  鈹溾攢鈹€ invoke_types.py     鈫?鎵€鏈夎姹?鍝嶅簲妯″瀷 + SafeActor
+鈹?  鈹溾攢鈹€ __init__.py
+鈹?  鈹斺攢鈹€ README.md
+鈹?
+鈹溾攢鈹€ db/                     鈫?鏁版嵁鎸佷箙鍖?
+鈹?  鈹溾攢鈹€ models.py           鈫?SQLAlchemy ORM 妯″瀷锛?5涓〃 + 杞崲鍑芥暟锛?
+鈹?  鈹溾攢鈹€ database.py         鈫?杩炴帴寮曟搸 + 鍒濆鍖?+ Session
+鈹?  鈹溾攢鈹€ __init__.py
+鈹?  鈹斺攢鈹€ README.md
+鈹?
+鈹溾攢鈹€ routes/                 鈫?FastAPI 璺敱瀹氫箟
+鈹?  鈹溾攢鈹€ health.py           鈫?/health 鍋ュ悍妫€鏌?
+鈹?  鈹溾攢鈹€ agents.py           鈫?/agents 娉ㄥ唽/鍒楄〃/蹇冭烦/杩涘寲
+鈹?  鈹溾攢鈹€ invoke.py           鈫?/invoke AI涓夊眰绠￠亾
+鈹?  鈹溾攢鈹€ game.py             鈫?/game Session/骞挎挱/澶嶇洏
+鈹?  鈹溾攢鈹€ memory.py           鈫?/memory 璁板綍/鍙洖/鐘舵€?
+鈹?  鈹溾攢鈹€ scripts.py          鈫?/scripts 鍓ф湰CRUD锛堜繚瀛?鍒楄〃/璇︽儏/鍒犻櫎锛?
+鈹?  鈹溾攢鈹€ evidence.py         鈫?/evidence 璇佺墿绯荤粺锛堝垱寤?鏌ヨ/鍑虹ず/缁勫悎/杩涘害锛?
+鈹?  鈹溾攢鈹€ spoiler_stories.py  鈫?/spoiler-stories 鍓ч€忔晠浜嬬鐞?
+鈹?  鈹溾攢鈹€ __init__.py
+鈹?  鈹斺攢鈹€ README.md
+鈹?
+鈹斺攢鈹€ README.md               鈫?鏈枃浠?
 ```
 
-## 当前需求
-- [ ] 实际测试所有 EvoMap 端点调用
-- [ ] 实际测试三层 LLM 管道
-- [ ] 实现流式 SSE 输出
-- [ ] 实现 constitution 自动改写逻辑
-- [ ] 添加图像生成路由（头像/封面/背景）
-- [ ] 添加 Council 治理路由
-- [ ] 证据 LLM 反应对接（/evidence/present 接入 llm_service）
+## 褰撳墠闇€姹?
+- [ ] 瀹為檯娴嬭瘯鎵€鏈?EvoMap 绔偣璋冪敤
+- [ ] 瀹為檯娴嬭瘯涓夊眰 LLM 绠￠亾
+- [ ] 瀹炵幇娴佸紡 SSE 杈撳嚭
+- [ ] 瀹炵幇 constitution 鑷姩鏀瑰啓閫昏緫
+- [ ] 娣诲姞鍥惧儚鐢熸垚璺敱锛堝ご鍍?灏侀潰/鑳屾櫙锛?
+- [ ] 娣诲姞 Council 娌荤悊璺敱
+- [ ] 璇佹嵁 LLM 鍙嶅簲瀵规帴锛?evidence/present 鎺ュ叆 llm_service锛?
 
-## 进度
-- ✅ 项目结构从扁平 → 模块化拆分完成
-- ✅ 所有 import 路径更新完毕
-- ✅ main.py 只做初始化 + 路由挂载
-- ✅ routes 从 main.py 单体拆分为 8 个独立文件
-- ✅ 数据库从 6 个表扩展到 15 个表（含游戏引擎完整的证物系统/进度表）
-- ✅ 剧本 CRUD API（保存/列表/详情/删除，含角色/证物/封面处理）
-- ✅ 运行时证物系统（创建/查询/更新/出示/组合/进度追踪，9个端点）
-- ✅ 剧透故事管理（CRUD + 批量删除，6个端点）
-- ✅ 全部新增端点集成测试通过
+## 杩涘害
+- 鉁?椤圭洰缁撴瀯浠庢墎骞?鈫?妯″潡鍖栨媶鍒嗗畬鎴?
+- 鉁?鎵€鏈?import 璺緞鏇存柊瀹屾瘯
+- 鉁?main.py 鍙仛鍒濆鍖?+ 璺敱鎸傝浇
+- 鉁?routes 浠?main.py 鍗曚綋鎷嗗垎涓?8 涓嫭绔嬫枃浠?
+- 鉁?鏁版嵁搴撲粠 6 涓〃鎵╁睍鍒?15 涓〃锛堝惈娓告垙寮曟搸瀹屾暣鐨勮瘉鐗╃郴缁?杩涘害琛級
+- 鉁?鍓ф湰 CRUD API锛堜繚瀛?鍒楄〃/璇︽儏/鍒犻櫎锛屽惈瑙掕壊/璇佺墿/灏侀潰澶勭悊锛?
+- 鉁?杩愯鏃惰瘉鐗╃郴缁燂紙鍒涘缓/鏌ヨ/鏇存柊/鍑虹ず/缁勫悎/杩涘害杩借釜锛?涓鐐癸級
+- 鉁?鍓ч€忔晠浜嬬鐞嗭紙CRUD + 鎵归噺鍒犻櫎锛?涓鐐癸級
+- 鉁?鍏ㄩ儴鏂板绔偣闆嗘垚娴嬭瘯閫氳繃
 
-## 疑问
-- 每个子目录的 README 中已列出各自的具体疑问
-- 最关键的阻塞点：EvoMap hello 端点的实际返回格式需要验证
-- 证据 /present 的 AI 反应：是在后端内调用 LLM，还是让前端用 /invoke 自己触发？
+## 鐤戦棶
+- 姣忎釜瀛愮洰褰曠殑 README 涓凡鍒楀嚭鍚勮嚜鐨勫叿浣撶枒闂?
+- 鏈€鍏抽敭鐨勯樆濉炵偣锛欵voMap hello 绔偣鐨勫疄闄呰繑鍥炴牸寮忛渶瑕侀獙璇?
+- 璇佹嵁 /present 鐨?AI 鍙嶅簲锛氭槸鍦ㄥ悗绔唴璋冪敤 LLM锛岃繕鏄鍓嶇鐢?/invoke 鑷繁瑙﹀彂锛?

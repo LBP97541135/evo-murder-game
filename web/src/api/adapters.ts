@@ -1,6 +1,6 @@
 import type { BackendScript, EvidenceRecord } from "./invoke";
 import type { ScriptCard } from "../pages/scriptData";
-import type { Evidence } from "../pages/gameMockData";
+import type { Evidence } from "../types";
 
 const FALLBACK_COVER =
   "https://images.unsplash.com/photo-1519501025264-65ba15a82390?w=1200&h=1500&fit=crop&auto=format";

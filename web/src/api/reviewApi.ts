@@ -49,9 +49,9 @@ export interface TruthReview {
   vote_analysis?: string;
 }
 
-export interface ReviewGene {
+export interface ReviewExperience {
   id?: string;
-  gene_id?: string;
+  experience_id?: string;
   agent_key?: string;
   agent_name?: string;
   summary?: string;
@@ -61,10 +61,10 @@ export interface ReviewGene {
   dmScore?: number;
   dmComment?: string;
   dmSuggestions?: string;
-  capsuleId?: string;
+  skillId?: string;
 }
 
-export interface ReviewCapsule {
+export interface ReviewSkill {
   id: string;
   title: string;
   category?: string;
@@ -79,7 +79,7 @@ export interface ReviewCapsule {
   createdAt?: string;
   stored_in_db?: boolean;
   reviewStatus?: string;
-  geneId?: string;
+  experienceId?: string;
 }
 
 export interface GameReviewBundle {
@@ -90,12 +90,12 @@ export interface GameReviewBundle {
   truth_review?: TruthReview;
   character_scores?: CharacterScore[];
   score_dimensions?: Array<{ key: string; label: string; description: string }>;
-  capsules?: ReviewCapsule[];
-  genes?: ReviewGene[];
+  skills?: ReviewSkill[];
+  experiences?: ReviewExperience[];
   evolution_summary?: {
-    genes_created?: number;
-    capsules_created?: number;
-    capsules_stored?: number;
+    experiences_created?: number;
+    skills_created?: number;
+    skills_stored?: number;
     errors?: string[];
   };
   message?: string;

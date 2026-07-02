@@ -10,7 +10,7 @@
 - 后端请求失败时直接显示错误，不使用本地业务数据掩盖接口故障。
 - 游戏页创建 Session 后，将 `session_id` 保存到
   `localStorage["game-session:{scriptId}"]`。
-- `REACT_APP_API_URL` 控制后端地址，默认值为 `http://localhost:8000`（见 `src/constants.ts`）。
+- `VITE_API_URL` 控制后端地址，默认值为 `http://localhost:8000`（见 `src/constants.ts`）。
 
 ## 页面接入情况
 

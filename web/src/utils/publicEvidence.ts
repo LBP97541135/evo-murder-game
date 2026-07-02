@@ -1,4 +1,4 @@
-import type { Evidence } from "../pages/gameMockData";
+import type { Evidence } from "../types";
 
 export type PublicEvidenceRecord = {
   id: string;

@@ -33,12 +33,18 @@ evo-murder-game/
 │   ├── main.py             # FastAPI 入口 + 路由挂载
 │   ├── requirements.txt    # Python 依赖
 │   ├── config/             # 配置管理（.env/settings）
-│   ├── evomap/             # EvoMap A2A 客户端
+│   ├── core/               # 核心模块（错误处理、响应格式、日志）
+│   ├── models/             # ORM 模型（按领域拆分）
+│   ├── schemas/            # Pydantic 请求/响应模型
+│   ├── repositories/       # 数据访问层
+│   ├── services/           # 业务逻辑层
+│   ├── routers/            # HTTP 路由层
+│   ├── domain/             # 领域规则和 prompt
+│   ├── integrations/       # 第三方集成（EvoMap 等）
 │   ├── agents/             # 多Agent编排系统
 │   ├── llm/                # LLM 三层管道 + 多Provider
-│   ├── schemas/            # Pydantic 请求/响应模型
 │   ├── db/                 # 数据持久化（ORM/连接）
-│   └── routes/             # FastAPI 路由定义
+│   └── tests/              # 单元测试
 │
 ├── web/                    # 前端（React TypeScript）
 │   ├── figma-make/         # Figma Make 导出的独立视觉参考工程
@@ -85,7 +91,7 @@ source .venv/bin/activate
 # 安装依赖
 pip install -r api/requirements.txt
 
-# 配置环境变量（复盘、DM评分、基因胶囊生成均依赖 LLM，必须配置 API_KEY）
+# 配置环境变量（复盘、DM评分、Skill 生成均依赖 LLM，必须配置 API_KEY）
 cp api/config/.env.example api/config/.env
 # 编辑 api/config/.env，填入你的 API_KEY 和 OPENAI_API_BASE
 
@@ -126,7 +132,21 @@ $env:REACT_APP_API_URL="http://your-host:8000"; npm start
 python scripts/import_xiutie_script.py
 ```
 
-### 4. 开始游戏
+### 4. 运行测试
+
+```bash
+# 运行所有测试
+pytest api/tests/
+
+# 运行特定测试文件
+pytest api/tests/test_smoke_core_flow.py
+pytest api/tests/test_skill_service.py
+
+# 生成测试覆盖率报告
+pytest --cov=api --cov-report=html
+```
+
+### 5. 开始游戏
 
 1. 浏览器打开 <http://localhost:3000> → 剧本库
 2. 选择剧本 → 选角 → 进入游戏
@@ -142,74 +162,61 @@ python scripts/import_xiutie_script.py
 
 ## 后端 API 总览
 
-后端已实现完整游戏流程，所有核心 API 测试通过。
+后端采用分层架构（routers → services → repositories → models），已实现完整游戏流程。详细接口说明见 [docs/API接口文档.md](docs/API接口文档.md)。
 
 ### 游戏引擎阶段流转
 
 ```
-intro ──→ investigation ──→ voting ──→ reveal ──→ review
- 开场介绍    自由调查       提交推理    真相揭示    复盘反思
- (无条件)   (对话≥3轮)    (投票完成)   (无条件)    (终态)
+setup → intro → script_reading → investigation → deduction → voting → reveal → review
+ 准备    介绍    剧本阅读          调查阶段        推理阶段    投票    揭晓    复盘
 ```
 
-### API 端点一览
+### API 端点一览（重构后）
 
 | 模块 | 端点 | 方法 | 功能 |
 |------|------|------|------|
-| **Health** | `/health` | GET | 健康检查 |
-| **Agent** | `/agents/register` | POST | 注册Agent（EvoMap/本地降级） |
-| | `/agents/list` | GET | 列出所有Agent |
-| | `/agents/heartbeat/{key}` | POST | 心跳保活 |
-| | `/agents/evolve/{key}` | POST | 更新constitution/identity_doc |
-| **剧本** | `/scripts/save` | POST | 保存剧本（含角色/证物/题目） |
-| | `/scripts/list` | GET | 剧本列表 |
+| **健康检查** | `/health` | GET | 健康检查 |
+| **剧本** | `/scripts/` | GET | 剧本列表 |
 | | `/scripts/{id}` | GET | 剧本详情 |
-| | `/scripts/{id}` | DELETE | 删除剧本 |
-| **游戏** | `/game/create-session` | POST | 创建游戏Session |
-| | `/game/phase/{id}` | GET | 查询当前阶段信息 |
-| | `/game/phase/{id}/advance` | POST | 推进到下一阶段 |
-| | `/game/phase/{id}/force` | POST | 强制跳转阶段（DM权限） |
-| | `/game/vote/{id}` | POST | 提交推理投票（凶手+动机） |
-| | `/game/chat-count/{id}` | POST | 记录对话轮数 |
-| | `/game/broadcast/{id}` | POST | 广播消息 |
-| | `/game/reflect/{id}` | POST | 局后反思 |
-| **AI调用** | `/invoke/` | POST | 三层管道（initial→critique→refine） |
-| | `/invoke/stream` | POST | SSE流式响应 |
-| **证物** | `/evidence/script/{sid}/session/{ssid}` | GET | 查询证物列表 |
-| | `/evidence/create` | POST | 创建证物 |
-| | `/evidence/{id}` | PUT | 更新证物状态 |
-| | `/evidence/{id}` | DELETE | 删除证物 |
-| | `/evidence/present` | POST | 出示证物给角色 |
-| | `/evidence/combine` | POST | 组合证物 |
-| | `/evidence/{id}/presentations` | GET | 出示历史 |
-| | `/evidence/progress/{sid}` | GET | 游戏进度 |
-| | `/evidence/progress/{sid}/phase` | POST | 更新进度阶段 |
-| **对话** | `/conversations/save` | POST | 保存对话记录 |
-| | `/conversations/session/{id}` | GET | 查询对话历史 |
-| | `/conversations/session/{id}` | DELETE | 清除对话 |
-| **剧透** | `/spoiler-stories/save` | POST | 保存剧透故事 |
-| | `/spoiler-stories/{sid}` | GET | 剧透故事列表 |
-| | `/spoiler-stories/story/{id}` | GET | 剧透故事详情 |
-| | `/spoiler-stories/{id}` | PUT/DELETE | 更新/删除 |
-| **记忆** | `/memory/record` | POST | 记录经验 |
-| | `/memory/recall` | POST | 召回经验 |
-| | `/memory/status/{key}` | GET | 记忆概况 |
-| **发言轮次** | `/game/speak-round/{id}/init` | POST | 初始化发言轮次 |
-| | `/game/speak-round/{id}` | GET | 查询发言轮次状态 |
-| | `/game/speak-round/{id}/next` | POST | 下一个发言人 |
-| | `/game/speak-round/{id}/interject` | POST | 插队打断 |
-| | `/game/speak-round/{id}/new-round` | POST | 开始新一轮 |
-| **私聊** | `/game/private-chat/{id}/send` | POST | 发送私聊消息 |
-| | `/game/private-chat/{id}/{agent_key}` | GET | 获取私聊线程列表 |
-| | `/game/private-chat/{id}/thread/{tid}` | GET | 获取私聊消息历史 |
-| **强制回答** | `/game/force-answer/{id}` | POST | 指定Agent回答问题 |
-| | `/game/force-answer/{id}/clear` | POST | 清除强制回答状态 |
+| | `/scripts/import` | POST | 导入剧本 |
+| **会话** | `/sessions/` | POST | 创建游戏会话 |
+| | `/sessions/{id}` | GET | 获取会话详情 |
+| | `/sessions/{id}/snapshot` | GET | 获取游戏快照 |
+| | `/sessions/{id}/end` | POST | 结束游戏 |
+| **选角** | `/sessions/{id}/cast/` | POST | 设置选角 |
+| | `/sessions/{id}/cast/` | GET | 获取选角信息 |
+| | `/sessions/{id}/cast/` | DELETE | 重置选角 |
+| **阶段** | `/sessions/{id}/phase/` | GET | 获取当前阶段 |
+| | `/sessions/{id}/phase/advance` | POST | 推进到下一阶段 |
+| | `/sessions/{id}/phase/force` | POST | 强制跳转阶段 |
+| **对话** | `/sessions/{id}/messages/` | GET | 获取消息列表 |
+| | `/sessions/{id}/messages/` | POST | 发送消息 |
+| | `/sessions/{id}/messages/threads` | GET | 获取对话线程列表 |
+| | `/sessions/{id}/messages/threads` | POST | 创建对话线程 |
+| **证物** | `/sessions/{id}/evidences/` | GET | 获取证物列表 |
+| | `/sessions/{id}/evidences/public` | GET | 获取公开证物 |
+| | `/sessions/{id}/evidences/discover` | POST | 发现证物 |
+| | `/sessions/{id}/evidences/present` | POST | 出示证物 |
+| **复盘** | `/sessions/{id}/review/` | GET | 获取复盘报告 |
+| | `/sessions/{id}/review/run` | POST | 运行复盘 |
+| **Skill** | `/skills/` | GET | Skill 列表 |
+| | `/skills/` | POST | 创建 Skill |
+| | `/skills/{id}` | GET/PATCH/DELETE | Skill CRUD |
+| | `/skills/search` | POST | 搜索 Skill |
+| | `/skills/import` | POST | 导入 Skill |
+| | `/skills/{id}/export` | GET | 导出 Skill |
+| | `/skills/{id}/review` | POST | 审核 Skill |
+| **Agent** | `/agents/` | GET | Agent 列表 |
+| | `/agents/` | POST | 创建 Agent |
+| | `/agents/{id}` | GET | Agent 详情 |
+| | `/agents/{id}/state` | GET | Agent 运行时状态 |
+| **用户** | `/users/profile` | GET/PATCH | 用户信息 |
 
 ### 最小可玩流程
 
 ```
-注册Agent → 保存剧本 → 创建Session → 推进阶段(intro→investigation)
-→ AI对话 → 投票 → 揭示真相 → 复盘
+创建会话 → 选角 → 推进阶段(setup→intro→investigation)
+→ 对话/出示证物 → 投票 → 揭示真相 → 复盘
 ```
 
 ### 待完善功能
@@ -361,3 +368,79 @@ intro ──→ investigation ──→ voting ──→ reveal ──→ review
 ## 许可
 
 本项目基于 ai-murder-mystery 的衍生项目，遵循其原始许可协议。
+
+---
+
+## 项目重构
+
+本项目已完成架构重构，升级为分层清晰、模块独立、可脱离 EvoMap 独立运行的 AI 剧本杀引擎。
+
+### 重构亮点
+
+- **分层架构**: routers → services → repositories → models，职责清晰
+- **Skill 资产系统**: 替代旧 Capsule 系统，支持创建、搜索、注入、导入导出
+- **EvoMap 解耦**: 核心游戏流程不依赖 EvoMap，EvoMap 作为可选集成
+- **Prompt 文件化**: 所有 prompt 以 markdown 文件管理，不再散落在代码中
+- **数据库重构**: 引入 Alembic 迁移，新表结构清晰
+- **前端重构**: GamePage 拆分为独立组件和 hooks，以服务端 snapshot 为唯一状态源
+- **完善测试**: 核心流程 smoke tests 和 Skill 系统单元测试全覆盖
+- **API 文档**: 完整的接口文档，包含请求/响应示例和错误码说明
+
+### 新目录结构
+
+```
+api/
+  core/          # 核心配置、错误处理、统一响应
+  models/        # ORM 模型（按领域拆分）
+  schemas/       # Pydantic DTO
+  repositories/  # 数据访问层
+  services/      # 业务逻辑层
+  routers/       # HTTP 路由层
+  domain/        # 领域规则和 prompt
+  integrations/  # 第三方集成（EvoMap 等）
+  tests/         # 单元测试
+```
+
+### 测试覆盖
+
+项目包含完善的测试套件：
+
+- **test_smoke_core_flow.py**: 核心流程 smoke tests，覆盖健康检查、会话创建、剧本列表、选角、阶段推进、对话、证物、复盘等
+- **test_skill_service.py**: Skill 系统测试，覆盖 CRUD、搜索、注入、导入导出、经验转化等
+- **test_session_service.py**: 会话服务测试
+- **test_prompt_loader.py**: Prompt 加载器测试
+
+运行测试：
+
+```bash
+# 运行所有测试
+pytest api/tests/
+
+# 运行特定测试文件
+pytest api/tests/test_smoke_core_flow.py
+pytest api/tests/test_skill_service.py
+
+# 生成测试覆盖率报告
+pytest --cov=api --cov-report=html
+```
+
+### 文档
+
+- [API 接口文档](docs/API接口文档.md) - 完整的 RESTful API 接口说明
+- [项目重构方案](docs/项目重构方案.md) - 架构重构详细设计
+- [核心游戏流程迁移方案](docs/核心游戏流程迁移方案.md) - 从旧版迁移指南
+- [协作规范](docs/协作规范.md) - 开发协作规范
+
+### 快速启动
+
+```bash
+# 后端
+cd api
+pip install -r requirements.txt
+uvicorn api.main:app --reload
+
+# 前端
+cd web
+npm install
+npm start
+```

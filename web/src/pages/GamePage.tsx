@@ -1,5 +1,5 @@
 import React from "react";
-const bgmUrl = new URL("../video_picture/剧本杀BGM.mp3", import.meta.url).href;
+const bgmUrl = "/assets/剧本杀BGM.mp3";
 
 import { StudioShell } from "./StudioShell";
 import {
@@ -48,7 +48,7 @@ import {
   GAME_PLAYERS,
   INTRO_LINES,
   PRIVATE_THREADS,
-} from "./gameMockData";
+} from "../constants/gameData";
 import { backendEvidenceToGameEvidence } from "../api/adapters";
 import {
   createEvidence,

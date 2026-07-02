@@ -1,5 +1,5 @@
 import type { AgentInfo, AgentPersona } from "../api/invoke";
-import type { GamePlayer } from "../pages/gameMockData";
+import type { GamePlayer } from "../types";
 
 export const HUMAN_PLAYER = "human-player";
 

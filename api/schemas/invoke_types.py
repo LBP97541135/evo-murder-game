@@ -123,7 +123,8 @@ class MemoryRecordRequest(BaseModel):
     """记录经验请求。"""
     node_id: str = ""
     signals: List[str] = []
-    gene_id: str = ""
+    gene_id: str = ""  # legacy, prefer source_experience_id
+    source_experience_id: str = ""
     status: str = "success"
     score: float = 0.0
     summary: str = ""

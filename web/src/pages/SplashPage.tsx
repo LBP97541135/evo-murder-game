@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 
 const titleImg = new URL("../video_picture/暗夜剧场字体.png", import.meta.url).href;
 const ctaImg = new URL("../video_picture/触碰以入局字体.png", import.meta.url).href;
-const videoSrc = new URL("../video_picture/开屏幕动画.mp4", import.meta.url).href;
+const videoSrc = "/assets/开屏幕动画.mp4";
 const posterImg = new URL("../video_picture/首帧画面.png", import.meta.url).href;
 
 type Phase = "idle" | "playing" | "ended";

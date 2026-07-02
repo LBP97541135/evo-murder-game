@@ -20,10 +20,11 @@ import { ScriptLibrary } from "./pages/ScriptLibrary";
 import { ScriptDetailPage } from "./pages/ScriptDetailPage";
 import { GamePage } from "./pages/GamePage";
 import { AgentPanel } from "./pages/AgentPanel";
-import { EvolutionTimeline } from "./pages/EvolutionTimeline";
+import { EvolutionTimeline } from "./pages/EvolutionTimeline.compass";
 import { MyGamesPage } from "./pages/MyGamesPage";
 import { ProfilePage } from "./pages/ProfilePage";
-import { GenePlazaPage } from "./pages/GenePlazaPage";
+import { SkillListPage } from "./features/skills/SkillListPage";
+import { SkillDetailPage } from "./features/skills/SkillDetailPage";
 import { ReviewPage } from "./pages/ReviewPage";
 import "./styles.css";
 
@@ -79,7 +80,8 @@ function App() {
                   <Route path="/play/:id" element={<GamePage />} />
                   <Route path="/agents" element={<AgentPanel />} />
                   <Route path="/evolution" element={<EvolutionTimeline />} />
-                  <Route path="/gene-plaza" element={<GenePlazaPage />} />
+                  <Route path="/skills" element={<SkillListPage />} />
+                  <Route path="/skills/:id" element={<SkillDetailPage />} />
                   <Route path="/review/:id" element={<ReviewPage />} />
                   <Route path="/profile" element={<ProfilePage />} />
                 </Routes>

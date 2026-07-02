@@ -1,4 +1,4 @@
-import type { Evidence } from "../pages/gameMockData";
+import type { Evidence } from "../types";
 
 export function roleEvidenceItemsToGameEvidence(
   items: Array<{ id: string; name: string; description: string; category?: string }>,

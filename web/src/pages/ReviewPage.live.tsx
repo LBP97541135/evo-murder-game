@@ -1,5 +1,5 @@
 /**
- * 复盘页（API 驱动）：DM 真相揭示 · 圆桌评分 · 基因胶囊
+ * 复盘页（API 驱动）：DM 真相揭示 · 圆桌评分 · 经验技能
  */
 
 import React from "react";
@@ -47,8 +47,8 @@ import {
   runGameReview,
   type CharacterScore,
   type GameReviewBundle,
-  type ReviewCapsule,
-  type ReviewGene,
+  type ReviewSkill,
+  type ReviewExperience,
   type ScoreDimensionKey,
 } from "../api/reviewApi";
 
@@ -105,40 +105,40 @@ const CATEGORY_COLORS: Record<string, string> = {
   strategy: "red",
 };
 
-function geneIdOf(gene?: ReviewGene) {
-  return gene?.gene_id || gene?.id || "";
+function experienceIdOf(experience?: ReviewExperience) {
+  return experience?.experience_id || experience?.id || "";
 }
 
-function pairGenesAndCapsules(genes: ReviewGene[], capsules: ReviewCapsule[]) {
-  const capByGeneId = new Map<string, ReviewCapsule>();
-  const capByAgent = new Map<string, ReviewCapsule>();
-  for (const cap of capsules) {
-    if (cap.geneId) capByGeneId.set(cap.geneId, cap);
-    if (cap.agent_key) capByAgent.set(cap.agent_key, cap);
+function pairExperiencesAndSkills(experiences: ReviewExperience[], skills: ReviewSkill[]) {
+  const skillByExperienceId = new Map<string, ReviewSkill>();
+  const skillByAgent = new Map<string, ReviewSkill>();
+  for (const skill of skills) {
+    if (skill.experienceId) skillByExperienceId.set(skill.experienceId, skill);
+    if (skill.agent_key) skillByAgent.set(skill.agent_key, skill);
   }
 
-  const rows: Array<{ key: string; gene?: ReviewGene; capsule?: ReviewCapsule }> = [];
-  const usedCaps = new Set<string>();
+  const rows: Array<{ key: string; experience?: ReviewExperience; skill?: ReviewSkill }> = [];
+  const usedSkills = new Set<string>();
 
-  for (const gene of genes) {
-    const gid = geneIdOf(gene);
-    const capsule =
-      (gid && capByGeneId.get(gid))
-      || (gene.agent_key && capByAgent.get(gene.agent_key))
-      || capsules.find((c) => c.geneId === gid);
-    if (capsule) usedCaps.add(capsule.id);
+  for (const experience of experiences) {
+    const eid = experienceIdOf(experience);
+    const skill =
+      (eid && skillByExperienceId.get(eid))
+      || (experience.agent_key && skillByAgent.get(experience.agent_key))
+      || skills.find((s) => s.experienceId === eid);
+    if (skill) usedSkills.add(skill.id);
     rows.push({
-      key: gid || gene.agent_key || gene.agent_name || "unknown",
-      gene,
-      capsule,
+      key: eid || experience.agent_key || experience.agent_name || "unknown",
+      experience,
+      skill,
     });
   }
 
-  for (const cap of capsules) {
-    if (usedCaps.has(cap.id)) continue;
+  for (const skill of skills) {
+    if (usedSkills.has(skill.id)) continue;
     rows.push({
-      key: cap.geneId || cap.agent_key || cap.id,
-      capsule: cap,
+      key: skill.experienceId || skill.agent_key || skill.id,
+      skill,
     });
   }
 
@@ -148,14 +148,14 @@ function pairGenesAndCapsules(genes: ReviewGene[], capsules: ReviewCapsule[]) {
 function isReviewReady(data: GameReviewBundle) {
   if (!data.success) return false;
   if (data.review_status === "generating") return false;
-  const geneCount = data.genes?.length ?? 0;
-  const capCount = data.capsules?.length ?? 0;
-  if (geneCount === 0 && capCount === 0) return false;
-  if (geneCount > 0 && capCount === 0) return false;
+  const experienceCount = data.experiences?.length ?? 0;
+  const skillCount = data.skills?.length ?? 0;
+  if (experienceCount === 0 && skillCount === 0) return false;
+  if (experienceCount > 0 && skillCount === 0) return false;
   return true;
 }
 
-function capsuleScorePercent(score?: number) {
+function skillScorePercent(score?: number) {
   const value = score ?? 0;
   return value <= 1 ? value * 100 : value;
 }
@@ -219,7 +219,7 @@ export function ReviewPage() {
   const [running, setRunning] = React.useState(false);
   const [error, setError] = React.useState("");
   const [selectedRole, setSelectedRole] = React.useState<string | null>(null);
-  const [selectedCapsule, setSelectedCapsule] = React.useState<ReviewCapsule | null>(null);
+  const [selectedSkill, setSelectedSkill] = React.useState<ReviewSkill | null>(null);
 
   const loadReview = React.useCallback(async (generate = false) => {
     if (!sessionId) {
@@ -262,7 +262,7 @@ export function ReviewPage() {
       }
 
       const needsGenerate = data.message === "review_not_generated"
-        || ((data.genes?.length ?? 0) === 0 && (data.capsules?.length ?? 0) === 0);
+        || ((data.experiences?.length ?? 0) === 0 && (data.skills?.length ?? 0) === 0);
 
       if (needsGenerate) {
         setRunning(true);
@@ -288,12 +288,12 @@ export function ReviewPage() {
     [bundle?.character_scores],
   );
   const truth = bundle?.truth_review;
-  const capsules = bundle?.capsules || [];
-  const genes = bundle?.genes || [];
+  const skills = bundle?.skills || [];
+  const experiences = bundle?.experiences || [];
 
   const evolutionRows = React.useMemo(
-    () => pairGenesAndCapsules(genes, capsules),
-    [genes, capsules],
+    () => pairExperiencesAndSkills(experiences, skills),
+    [experiences, skills],
   );
 
   const highestRole = React.useMemo(() => {
@@ -333,7 +333,7 @@ export function ReviewPage() {
           <Paper radius="xl" p="xl" className="industrial-card">
             <Group justify="center" gap="md">
               <Loader color="red" />
-              <Text c="dimmed">{running ? "DM 正在复盘评分并生成基因胶囊…" : "加载复盘数据…"}</Text>
+              <Text c="dimmed">{running ? "DM 正在复盘评分并生成经验技能…" : "加载复盘数据…"}</Text>
             </Group>
           </Paper>
         )}
@@ -350,7 +350,7 @@ export function ReviewPage() {
             <Tabs.List grow mb="md">
               <Tabs.Tab value="truth">DM 揭示真相</Tabs.Tab>
               <Tabs.Tab value="table" leftSection={<IconUsers size={16} />}>圆桌评分</Tabs.Tab>
-              <Tabs.Tab value="capsules" leftSection={<IconDna size={16} />}>基因胶囊</Tabs.Tab>
+              <Tabs.Tab value="skills" leftSection={<IconDna size={16} />}>经验技能</Tabs.Tab>
             </Tabs.List>
 
             <Tabs.Panel value="truth" pt="md">
@@ -396,8 +396,8 @@ export function ReviewPage() {
 
                   {bundle.evolution_summary && (
                     <Group gap="md">
-                      <Badge color="teal" variant="light">基因 {bundle.evolution_summary.genes_created ?? 0}</Badge>
-                      <Badge color="yellow" variant="light">胶囊 {bundle.evolution_summary.capsules_created ?? 0}</Badge>
+                      <Badge color="teal" variant="light">经验 {bundle.evolution_summary.experiences_created ?? 0}</Badge>
+                      <Badge color="yellow" variant="light">技能 {bundle.evolution_summary.skills_created ?? 0}</Badge>
                     </Group>
                   )}
                 </Stack>
@@ -448,7 +448,7 @@ export function ReviewPage() {
               </Paper>
             </Tabs.Panel>
 
-            <Tabs.Panel value="capsules" pt="md">
+            <Tabs.Panel value="skills" pt="md">
               <Paper radius="xl" p="xl" className="industrial-card">
                 <Stack gap="lg">
                   <Group justify="space-between" align="flex-start" wrap="wrap">
@@ -456,24 +456,24 @@ export function ReviewPage() {
                       <Group gap="xs">
                         <IconDna size={18} color="#fbbf24" />
                         <Text className="monospace-label" size="xs" c="yellow.3">
-                          gene capsule dashboard
+                          experience skill dashboard
                         </Text>
                       </Group>
-                      <Title order={3} mt={4}>基因胶囊 · 经验可视化</Title>
+                      <Title order={3} mt={4}>经验技能 · 经验可视化</Title>
                       <Text size="sm" c="dimmed" mt={4} maw={640} lh={1.7}>
-                        陪玩 Agent 听取 DM 复盘后自我分析 → 生成 Gene → DM 评审 → 提炼 Capsule。
-                        仅本局参与的 Agent 会产出胶囊。
+                        陪玩 Agent 听取 DM 复盘后自我分析 → 生成 Experience → DM 评审 → 提炼 Skill。
+                        仅本局参与的 Agent 会产出技能。
                       </Text>
                     </Box>
                     <Group gap="xs">
-                      <Badge color="grape" variant="light" size="lg">{genes.length} 基因</Badge>
-                      <Badge color="yellow" variant="light" size="lg">{capsules.length} 胶囊</Badge>
+                      <Badge color="grape" variant="light" size="lg">{experiences.length} 经验</Badge>
+                      <Badge color="yellow" variant="light" size="lg">{skills.length} 技能</Badge>
                     </Group>
                   </Group>
 
                   {evolutionRows.length === 0 ? (
                     <Stack gap="xs">
-                      <Text c="dimmed">暂无基因/胶囊，请点击下方「重新运行复盘与胶囊生成」。</Text>
+                      <Text c="dimmed">暂无经验/技能，请点击下方「重新运行复盘与技能生成」。</Text>
                       {bundle.evolution_summary?.errors?.length ? (
                         <Text size="sm" c="orange.3">
                           生成日志：{bundle.evolution_summary.errors.join("；")}
@@ -482,10 +482,10 @@ export function ReviewPage() {
                     </Stack>
                   ) : (
                     <Box className="agent-masonry">
-                      {evolutionRows.map(({ key, gene, capsule }) => {
-                        const agentName = gene?.agent_name || capsule?.agent_name || key;
+                      {evolutionRows.map(({ key, experience, skill }) => {
+                        const agentName = experience?.agent_name || skill?.agent_name || key;
                         const portrait = agentPortraits[agentName];
-                        const capScore = capsuleScorePercent(capsule?.score);
+                        const skillScore = skillScorePercent(skill?.score);
                         return (
                           <Box key={key} className="agent-masonry__item">
                             <Card radius="lg" className="evolution-card tone-panel" p={0}>
@@ -497,31 +497,31 @@ export function ReviewPage() {
                                     </Avatar>
                                     <Box>
                                       <Text fw={700} size="sm">{agentName}</Text>
-                                      <Text size="xs" c="dimmed">Gene → Capsule</Text>
+                                      <Text size="xs" c="dimmed">Experience → Skill</Text>
                                     </Box>
                                   </Group>
                                   <Group gap={6}>
-                                    {gene ? <Badge size="xs" color="grape" variant="dot">Gene</Badge> : null}
-                                    {capsule ? (
+                                    {experience ? <Badge size="xs" color="grape" variant="dot">Experience</Badge> : null}
+                                    {skill ? (
                                       <Badge
                                         size="xs"
-                                        color={capsule.stored_in_db === false ? "gray" : "yellow"}
+                                        color={skill.stored_in_db === false ? "gray" : "yellow"}
                                         variant="dot"
                                       >
-                                        {capsule.stored_in_db === false ? "预览" : "已入库"}
+                                        {skill.stored_in_db === false ? "预览" : "已入库"}
                                       </Badge>
                                     ) : null}
                                   </Group>
                                 </Group>
                               </Box>
 
-                              {gene ? (
-                                <Box className="evolution-card__gene" px="md" pb="sm">
-                                  <Text size="xs" className="monospace-label" c="grape.3" mb={4}>raw gene</Text>
-                                  <Text size="sm" fw={600} lh={1.5}>{gene.summary || "（无摘要）"}</Text>
-                                  <Text size="xs" c="dimmed" lineClamp={3} mt={4}>{gene.detail}</Text>
-                                  {gene.dmComment ? (
-                                    <Text size="xs" c="orange.3" mt={6}>DM：{gene.dmComment}</Text>
+                              {experience ? (
+                                <Box className="evolution-card__experience" px="md" pb="sm">
+                                  <Text size="xs" className="monospace-label" c="grape.3" mb={4}>raw experience</Text>
+                                  <Text size="sm" fw={600} lh={1.5}>{experience.summary || "（无摘要）"}</Text>
+                                  <Text size="xs" c="dimmed" lineClamp={3} mt={4}>{experience.detail}</Text>
+                                  {experience.dmComment ? (
+                                    <Text size="xs" c="orange.3" mt={6}>DM：{experience.dmComment}</Text>
                                   ) : null}
                                 </Box>
                               ) : null}
@@ -530,33 +530,33 @@ export function ReviewPage() {
                                 <IconDna size={16} style={{ opacity: 0.45 }} />
                               </Box>
 
-                              {capsule ? (
+                              {skill ? (
                                 <Box
-                                  className="evolution-card__capsule ambient-grid"
+                                  className="evolution-card__skill ambient-grid"
                                   p="md"
                                   style={{ cursor: "pointer" }}
-                                  onClick={() => setSelectedCapsule(capsule)}
+                                  onClick={() => setSelectedSkill(skill)}
                                 >
                                   <Group justify="space-between" mb="xs">
                                     <Badge
                                       size="sm"
                                       variant="filled"
-                                      color={CATEGORY_COLORS[capsule.category || ""] || "gray"}
-                                      leftSection={CATEGORY_ICONS[capsule.category || ""]}
+                                      color={CATEGORY_COLORS[skill.category || ""] || "gray"}
+                                      leftSection={CATEGORY_ICONS[skill.category || ""]}
                                     >
-                                      {categoryLabel(capsule.category)}
+                                      {categoryLabel(skill.category)}
                                     </Badge>
-                                    <Badge size="sm" variant="light" color={getScoreColor(capScore)}>
-                                      {(capsule.score ?? 0) <= 1 ? (capsule.score ?? 0).toFixed(2) : capScore.toFixed(0)}
+                                    <Badge size="sm" variant="light" color={getScoreColor(skillScore)}>
+                                      {(skill.score ?? 0) <= 1 ? (skill.score ?? 0).toFixed(2) : skillScore.toFixed(0)}
                                     </Badge>
                                   </Group>
-                                  <Text fw={700} size="sm" lh={1.45}>{capsule.title}</Text>
+                                  <Text fw={700} size="sm" lh={1.45}>{skill.title}</Text>
                                   <Text size="xs" c="dimmed" lineClamp={4} mt={6} lh={1.65}>
-                                    {capsule.content || "（暂无内容）"}
+                                    {skill.content || "（暂无内容）"}
                                   </Text>
-                                  {(capsule.signals?.length ?? 0) > 0 && (
+                                  {(skill.signals?.length ?? 0) > 0 && (
                                     <Group gap={4} mt="sm">
-                                      {capsule.signals!.slice(0, 3).map((tag) => (
+                                      {skill.signals!.slice(0, 3).map((tag) => (
                                         <Badge key={tag} size="xs" variant="outline" color="gray">{tag}</Badge>
                                       ))}
                                     </Group>
@@ -568,7 +568,7 @@ export function ReviewPage() {
                                 </Box>
                               ) : (
                                 <Box px="md" pb="md">
-                                  <Text size="xs" c="dimmed">胶囊生成中或失败，请重新运行复盘。</Text>
+                                  <Text size="xs" c="dimmed">技能生成中或失败，请重新运行复盘。</Text>
                                 </Box>
                               )}
                             </Card>
@@ -586,7 +586,7 @@ export function ReviewPage() {
         {!loading && bundle && (
           <Group justify="center">
             <Button variant="light" radius="xl" onClick={() => void loadReview(true)} loading={running}>
-              重新运行复盘与胶囊生成
+              重新运行复盘与技能生成
             </Button>
           </Group>
         )}
@@ -616,39 +616,39 @@ export function ReviewPage() {
       </Modal>
 
       <Modal
-        opened={!!selectedCapsule}
-        onClose={() => setSelectedCapsule(null)}
+        opened={!!selectedSkill}
+        onClose={() => setSelectedSkill(null)}
         title={null}
         radius="xl"
         size="md"
         overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
       >
-        {selectedCapsule && (
+        {selectedSkill && (
           <Paper radius="xl" className="industrial-card" p="lg">
             <Stack gap="md">
               <Group justify="space-between">
                 <Badge
                   variant="filled"
-                  color={CATEGORY_COLORS[selectedCapsule.category || ""] || "gray"}
-                  leftSection={CATEGORY_ICONS[selectedCapsule.category || ""]}
+                  color={CATEGORY_COLORS[selectedSkill.category || ""] || "gray"}
+                  leftSection={CATEGORY_ICONS[selectedSkill.category || ""]}
                 >
-                  {categoryLabel(selectedCapsule.category)}
+                  {categoryLabel(selectedSkill.category)}
                 </Badge>
-                <Badge variant="light" color={getScoreColor(capsuleScorePercent(selectedCapsule.score))}>
-                  评分 {(selectedCapsule.score ?? 0) <= 1
-                    ? (selectedCapsule.score ?? 0).toFixed(2)
-                    : capsuleScorePercent(selectedCapsule.score).toFixed(0)}
+                <Badge variant="light" color={getScoreColor(skillScorePercent(selectedSkill.score))}>
+                  评分 {(selectedSkill.score ?? 0) <= 1
+                    ? (selectedSkill.score ?? 0).toFixed(2)
+                    : skillScorePercent(selectedSkill.score).toFixed(0)}
                 </Badge>
               </Group>
-              <Title order={3}>{selectedCapsule.title}</Title>
-              {selectedCapsule.agent_name && (
-                <Text size="sm" c="dimmed">{selectedCapsule.agent_name} · 本局经验胶囊</Text>
+              <Title order={3}>{selectedSkill.title}</Title>
+              {selectedSkill.agent_name && (
+                <Text size="sm" c="dimmed">{selectedSkill.agent_name} · 本局经验技能</Text>
               )}
-              <Text size="sm" lh={1.8}>{selectedCapsule.content}</Text>
-              {selectedCapsule.strategy && (
+              <Text size="sm" lh={1.8}>{selectedSkill.content}</Text>
+              {selectedSkill.strategy && (
                 <>
                   <Text fw={700} size="sm">策略</Text>
-                  <Text size="sm" c="dimmed" style={{ whiteSpace: "pre-wrap" }}>{selectedCapsule.strategy}</Text>
+                  <Text size="sm" c="dimmed" style={{ whiteSpace: "pre-wrap" }}>{selectedSkill.strategy}</Text>
                 </>
               )}
             </Stack>
